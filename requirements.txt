@@ -9,4 +9,4 @@ itsdangerous>=2.1.0
 # Ajouts (requis par Web/app.py — manquants à l'origine, audit 2026-06-22)
 flask-socketio>=5.6.0
 flask-cors>=6.0.0
-eventlet>=0.40.0
+eventlet>=0.41.3
