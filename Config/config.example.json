@@ -1,0 +1,78 @@
+{
+  "Logging": {
+    "EnableDebugLogging": false,
+    "LogRotationCount": 5,
+    "LogLevels": [
+      "INFO",
+      "WARNING",
+      "ERROR",
+      "CRITICAL"
+    ],
+    "MaxLogSize": 10485760
+  },
+  "UserProfiles": {
+    "ProfilesDir": "C:\\Users",
+    "EnableBackup": true,
+    "BackupLocation": "D:\\ProfileBackups",
+    "DefaultProfilePath": "C:\\Users\\Default",
+    "BackupRetentionDays": 30
+  },
+  "Security": {
+    "AgentCommunicationToken": "CHANGE_ME__set_via_env_SAM_AGENT_TOKEN",
+    "EnforcePasswordPolicy": true,
+    "AuditFailedLogins": true,
+    "RequireComplexity": true,
+    "MinimumPasswordLength": 12
+  },
+  "SystemResourceManagement": {
+    "DiskCriticalThreshold": 90,
+    "DiskWarningThreshold": 75,
+    "RefreshInterval": 60,
+    "MemoryWarningThreshold": 70,
+    "MemoryCriticalThreshold": 90,
+    "CPUWarningThreshold": 60,
+    "CPUCriticalThreshold": 80
+  },
+  "RDSSessionManagement": {
+    "DefaultMaxSessionTime": 480,
+    "DefaultIdleTimeout": 60,
+    "EnableNotifications": true,
+    "AutoDisconnectInactiveHours": 24,
+    "RefreshInterval": 30
+  },
+  "General": {
+    "RDSConnectionBroker": "localhost",
+    "BackupPath": "Backups/",
+    "AdminUsers": [
+      "admin"
+    ],
+    "LogRetentionDays": 30,
+    "LogPath": "Logs",
+    "CheckForUpdates": true
+  },
+  "SessionUserAgent": {
+    "Enabled": true,
+    "AutoDisconnectInactive": true,
+    "InactiveTimeoutMinutes": 120,
+    "ProfileCleanupEnabled": true,
+    "TempCleanupSchedule": "daily",
+    "QuotaMonitoring": true,
+    "MaxProfileSizeGB": 5
+  },
+  "AgentMaster": {
+    "Url": "http://sam-master:5000",
+    "Ip": "192.0.2.10",
+    "Token": "CHANGE_ME__set_via_env_SAM_MASTER_TOKEN"
+  },
+  "RDSServers": {
+    "ConnectionBroker": "RDS-BROKER.contoso.local",
+    "SessionHosts": [
+      "RDSH01.contoso.local",
+      "RDSH02.contoso.local",
+      "RDSH03.contoso.local",
+      "RDSH04.contoso.local"
+    ],
+    "UseManualServerList": false,
+    "QueryMethod": "WMI"
+  }
+}

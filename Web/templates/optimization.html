@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header %}
+
+{% block title %}Optimisation Broker{% endblock %}
+{% block page_title %}Optimisation & Recommandations Broker{% endblock %}
+
+{% block content %}
+<div id="section-optimization" class="content-section" style="max-width: 1600px; margin: 0 auto;">
+    <div class="card">
+        <div class="row justify-between" style="margin-bottom:24px;">
+            {{ card_header('bolt', 'Analyse de Performance Intelligente', 'text-success') }}
+            <button class="btn-premium" onclick="updateOptimization()">RELANCER L'ANALYSE</button>
+        </div>
+
+        <div id="optimization-content">
+            <div class="row gap-4" style="background:var(--success-light); border:1px solid var(--success); padding:20px; border-radius:16px; margin-bottom:24px;">
+                <span class="material-symbols-rounded text-success" style="font-size:32px;">analytics</span>
+                <div id="optimization-overview" class="font-bold text-subtle">Calcul des métriques en cours...</div>
+            </div>
+            <div id="recommendations-list" class="stack gap-4">
+                <!-- Loaded dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function updateOptimization() {
+        showToast('Analyse de performance lancée...', 'info');
+        try {
+            const res = await fetch('/api/broker-optimization');
+            const data = await res.json();
+            
+            document.getElementById('optimization-overview').innerHTML = `
+                Dernier scan : ${new Date(data.timestamp).toLocaleTimeString()}<br>
+                Environnement : ${data.server_count} serveurs / ${data.session_count} sessions analysées
+            `;
+            
+            const list = document.getElementById('recommendations-list');
+            list.innerHTML = '';
+            
+            if (data.recommendations && data.recommendations.length > 0) {
+                data.recommendations.forEach(rec => {
+                    // Palette du design system — pas de hex custom, pas de liseret latéral.
+                    const colors = {
+                        critical: { bg: 'var(--error-light)',   border: 'var(--error)',   text: 'var(--error)',       icon: 'report' },
+                        warning:  { bg: 'var(--warning-light)', border: 'var(--warning)', text: 'var(--warning-dark)', icon: 'warning' },
+                        info:     { bg: 'var(--info-light)',    border: 'var(--accent-primary)', text: 'var(--accent-primary)', icon: 'info' }
+                    };
+                    const style = colors[rec.type] || colors.info;
+
+                    list.innerHTML += `
+                        <div style="background:${style.bg}; border:1px solid ${style.border}; padding:20px; border-radius:16px;">
+                            <h4 class="row gap-2" style="margin:0 0 8px 0; color:${style.text};">
+                                <span class="material-symbols-rounded">${style.icon}</span> ${rec.title}
+                            </h4>
+                            <p class="text-subtle font-semibold" style="margin:0; font-size:0.9rem;">${rec.message}</p>
+                        </div>
+                    `;
+                });
+            } else {
+                list.innerHTML = '<div class="text-center text-muted" style="padding:40px;">Aucune recommandation critique pour le moment. Votre broker est optimal !</div>';
+            }
+        } catch (e) {
+            showToast('Échec de l\'analyse', 'error');
+        }
+    }
+
+    updateOptimization();
+</script>
+{% endblock %}

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/lugio/sysadminmaster/security/advisories/new
+    about: Report vulnerabilities privately (see SECURITY.md). Never in a public issue.
+  - name: Question or idea
+    url: https://github.com/lugio/sysadminmaster/discussions
+    about: Ask a question or discuss an idea before opening an issue.

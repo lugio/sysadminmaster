@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header, tool_card %}
+
+{% block title %}Actions Système{% endblock %}
+{% block page_title %}Actions Système & Maintenance{% endblock %}
+
+{% block content %}
+<div class="content-section fade-in" style="max-width: 1600px; margin: 0 auto;">
+
+    <!-- En-tête de page -->
+    <div class="row justify-between flex-wrap gap-3" style="margin-bottom:28px;">
+        <div>
+            <p class="text-subtle font-semibold" style="margin:0; font-size:0.85rem;">Centre d'Exécution et Orchestration</p>
+            <p class="text-muted" style="margin:4px 0 0; font-size:0.78rem;">Lancez des actions de maintenance et des scripts de correction sur la ferme RDS.</p>
+        </div>
+        <div class="row gap-2 text-accent font-bold" style="background:var(--info-light); border:1px solid rgba(59,130,246,.2); padding:8px 16px; border-radius:10px; font-size:0.78rem;">
+            <span class="material-symbols-rounded" style="font-size:16px;">terminal</span>
+            Console Active
+        </div>
+    </div>
+
+    <!-- ── MAINTENANCE & ESPACE ─────────────────────────────────────────── -->
+    <div class="tools-section-header">
+        <span class="section-badge blue">
+            <span class="material-symbols-rounded" style="font-size:14px;">cleaning_services</span>
+            Maintenance &amp; Optimisation d'Espace
+        </span>
+    </div>
+    <div class="tools-grid" style="margin-bottom:32px;">
+        {{ tool_card('delete_sweep', 'blue', 'Nettoyage TEMP', 'Suppression des fichiers temporaires système et utilisateurs.', 'clear_temp') }}
+        {{ tool_card('auto_fix_high', 'blue', 'Maintenance Globale', 'Cycle complet : TEMP + RAM + Spouleur + DNS en une seule passe.', 'MaintenanceAndOptimization.ps1') }}
+        {{ tool_card('memory_alt', 'blue', 'Optimisation RAM', 'Récupération de mémoire sur les processus inactifs (EmptyWorkingSet).', 'optimize_ram') }}
+    </div>
+
+    <!-- ── DÉPANNAGE & SERVICES CRITIQUES ─────────────────────────────── -->
+    <div class="tools-section-header">
+        <span class="section-badge amber">
+            <span class="material-symbols-rounded" style="font-size:14px;">build</span>
+            Dépannage &amp; Services Critiques
+        </span>
+    </div>
+    <div class="tools-grid" style="margin-bottom:32px;">
+        {{ tool_card('print', 'amber', 'Spouleur Impression', "Relance le service et purge la file d'attente locale.", 'restart_spooler') }}
+        {{ tool_card('dns', 'amber', 'Flush DNS & Réseau', 'Réinitialise le cache DNS local (ipconfig /flushdns + Clear-DnsClientCache).', 'flush_dns') }}
+        {{ tool_card('bug_report', 'amber', 'Diagnostic RDS', "Analyse avancée des services RDS, sessions actives et événements d'erreur récents.", 'TroubleshootingAndDiagnostics.ps1') }}
+    </div>
+
+    <!-- ── SÉCURITÉ & OBJETS UTILISATEURS ──────────────────────────────── -->
+    <div class="tools-section-header">
+        <span class="section-badge red">
+            <span class="material-symbols-rounded" style="font-size:14px;">security</span>
+            Sécurité &amp; Objets Utilisateurs
+        </span>
+    </div>
+    <div class="tools-grid" style="margin-bottom:40px;">
+        {{ tool_card('policy', 'red', 'Audit Sécurité', 'Vérification des GPO appliquées, admins locaux, Defender et UAC.', 'SecurityAndCompliance.ps1') }}
+        {{ tool_card('account_box', 'red', 'Gestion Profils', 'Inventaire et réparation des droits sur les dossiers profils utilisateurs.', 'UserProfileManagement.ps1') }}
+        {{ tool_card('apps', 'red', 'Gestion Apps', 'Inventaire des applications installées et top processus CPU sur la ferme.', 'ApplicationManagement.ps1') }}
+    </div>
+
+    <!-- ── CONSOLE INTERACTIVE (SHELL PS) ──────────────────────────────── -->
+    <div class="tools-section-header">
+        <span class="section-badge blue">
+            <span class="material-symbols-rounded" style="font-size:14px;">terminal</span>
+            Console Interactive (Shell PS)
+        </span>
+    </div>
+    <div class="card" style="margin-bottom:28px;">
+        <div class="row justify-between flex-wrap gap-2" style="margin-bottom:14px;">
+            <h3 style="margin:0; font-size:0.9rem;">
+                <span class="material-symbols-rounded text-accent">code</span>
+                Exécution directe PowerShell
+            </h3>
+            <div class="row gap-2 text-subtle" style="font-size:0.75rem;">
+                <span class="material-symbols-rounded" style="font-size:14px;">info</span>
+                Cible :
+                <strong id="shell-target-display" class="text-accent">—</strong>
+            </div>
+        </div>
+        <div class="shell-input-wrap">
+            <input type="text" id="shell-input"
+                   placeholder="Ex: Get-Service -Name TermService | Select Name,Status"
+                   onkeydown="if(event.key==='Enter') runShell()">
+            <button class="btn-premium" onclick="runShell()" style="padding:10px 20px; white-space:nowrap;">
+                <span class="material-symbols-rounded" style="font-size:18px;">play_arrow</span>
+                Exécuter
+            </button>
+        </div>
+        <p class="text-muted" style="margin:10px 0 0; font-size:0.72rem;">
+            Sélectionner un serveur RDS spécifique dans le filtre en haut — la console ne fonctionne pas sur Broker (Linux).
+        </p>
+    </div>
+
+    <!-- ── TERMINAL DE SORTIE ───────────────────────────────────────────── -->
+    <div id="tool-output-container" style="display:none; margin-bottom:40px;">
+        <div class="tool-terminal">
+            <div class="tool-terminal-header">
+                <div class="row gap-4">
+                    <div class="terminal-dots">
+                        <span style="background:#ff5f56;"></span>
+                        <span style="background:#ffbd2e;"></span>
+                        <span style="background:#27c93f;"></span>
+                    </div>
+                    <span class="terminal-title">PowerShell Execution Engine</span>
+                </div>
+                <button onclick="document.getElementById('tool-output-container').style.display='none'"
+                        class="row text-muted" style="background:transparent; border:none; cursor:pointer;">
+                    <span class="material-symbols-rounded" style="font-size:18px;">close</span>
+                </button>
+            </div>
+            <div id="tool-output" class="tool-terminal-body">
+                <span class="text-subtle">En attente d'une commande...</span>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const BROKER = {{ broker_host | tojson }};
+    // Synchronise l'affichage de la cible avec le filtre global
+    window.onServerChange = function(server) {
+        const el = document.getElementById('shell-target-display');
+        if (el) el.innerText = (server === 'All' || server === 'Tous') ? BROKER + ' (défaut)' : server.split('.')[0].toUpperCase();
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const saved = localStorage.getItem('sam_last_server') || 'All';
+        window.onServerChange(saved);
+    });
+
+    function _getServer() {
+        const sel = document.getElementById('global-server-filter');
+        return sel ? sel.value : 'All';
+    }
+
+    function _showTerminal(html) {
+        const container = document.getElementById('tool-output-container');
+        const output    = document.getElementById('tool-output');
+        container.style.display = 'block';
+        output.innerHTML = html;
+        output.scrollTop = output.scrollHeight;
+    }
+
+    async function runShell() {
+        const input  = document.getElementById('shell-input');
+        const cmd    = input.value.trim();
+        const server = _getServer();
+        if (!cmd) return;
+
+        _showTerminal(`<span style="color:var(--accent-tertiary);">&gt; ${cmd.replace(/</g,'&lt;')}</span>\n<span style="color:var(--slate-400);">Exécution sur ${server}…</span>`);
+        input.value = '';
+
+        try {
+            const res  = await fetch('/api/shell', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({command: cmd, server: server})
+            });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                const out = (data.stdout || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const err = data.stderr ? `\n<span style="color:var(--error);">${data.stderr.replace(/</g,'&lt;')}</span>` : '';
+                _showTerminal(`<span style="color:var(--accent-tertiary);">&gt; ${cmd.replace(/</g,'&lt;')}</span>\n${out}${err}`);
+            } else {
+                const msg = (data.error || 'Erreur inconnue').replace(/</g,'&lt;');
+                _showTerminal(`<span style="color:var(--accent-tertiary);">&gt; ${cmd.replace(/</g,'&lt;')}</span>\n<span style="color:var(--error);">❌ ${msg}</span>`);
+            }
+        } catch (e) {
+            _showTerminal(`<span style="color:var(--error);">❌ Erreur réseau : ${e.message}</span>`);
+        }
+    }
+
+    async function runTool(scriptName) {
+        const server     = _getServer();
+        const targetName = (server === 'All' || server === 'Tous') ? BROKER : server.split('.')[0].toUpperCase();
+
+        _showTerminal(
+            `<span style="color:var(--accent-tertiary); font-weight:700;">[*] ${scriptName} → ${targetName}</span>\n` +
+            `<span style="color:var(--slate-400);">Envoi de la commande à l'agent… (délai max 60s)</span>`
+        );
+        showToast(`${scriptName} → ${targetName}`, 'info');
+
+        try {
+            const res    = await fetch('/api/tools', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({script: scriptName, server: server})
+            });
+            const result = await res.json();
+
+            const ok     = result.status === 'success';
+            const raw    = (result.output || result.message || (ok ? 'OK' : 'Erreur inconnue'));
+            const output = raw.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const color  = ok ? 'var(--success)' : 'var(--error)';
+            const icon   = ok ? '✓' : '✗';
+
+            _showTerminal(
+                `<span style="color:var(--accent-tertiary); font-weight:700;">&gt; RÉSULTAT : ${scriptName} [${targetName}]</span>\n` +
+                `<span style="color:${color};">${icon} ${output}</span>`
+            );
+
+            showToast(ok ? `Succès : ${scriptName}` : `Erreur : ${raw.slice(0,80)}`, ok ? 'success' : 'error');
+        } catch (e) {
+            _showTerminal(`<span style="color:var(--error);">❌ Erreur réseau : ${e.message}</span>`);
+            showToast('Erreur réseau', 'error');
+        }
+    }
+</script>
+{% endblock %}

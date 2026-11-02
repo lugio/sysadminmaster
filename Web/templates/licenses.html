@@ -1,0 +1,699 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header, stat_card %}
+
+{% block title %}Licences Office 365{% endblock %}
+{% block page_title %}Licences Office 365 — Etat par serveur RDS{% endblock %}
+
+{% block content %}
+<div class="content-section fade-in">
+
+    <!-- BANDEAU TOTAUX FERME -->
+    <div class="stat-strip" style="margin-bottom:24px;">
+        {{ stat_card('verified', 'Jetons OK', '—', 'bg-success-soft', 'total-ok') }}
+        {{ stat_card('schedule', 'Jetons périmés', '—', 'bg-warning-soft', 'total-stale') }}
+        {{ stat_card('error', 'Jetons absents', '—', 'bg-error-soft', 'total-missing') }}
+        {{ stat_card('dns', 'Serveurs audités', '—', 'bg-primary-soft', 'total-hosts') }}
+    </div>
+
+    <!-- RECHERCHE UTILISATEUR (réflexe support : « Dupont appelle » → où est son jeton ?) -->
+    <div class="card" style="margin-bottom:20px;">
+        {{ card_header('person_search', 'Recherche utilisateur') }}
+        <p class="text-subtle" style="font-size:0.78rem; margin-bottom:12px;">
+            Un utilisateur se plaint d'Office ? Cherchez-le ici : son serveur, l'état de son jeton
+            et la réparation en un clic — sans parcourir les serveurs un à un.
+        </p>
+        <input type="text" id="user-search" class="form-control" placeholder="Nom de l'utilisateur (ex : dupont)…"
+               style="max-width:420px;" autocomplete="off">
+        <div id="user-search-results" style="margin-top:12px;"></div>
+    </div>
+
+    <!-- NOTE D'INFORMATION -->
+    <div class="card" style="margin-bottom:20px; padding:14px 18px;">
+        <div class="text-subtle" style="font-size:0.8rem;">
+            <strong>Source :</strong> télémétrie agent (heartbeat 10s, lecture seule).
+            Un jeton est <strong class="text-warning">périmé</strong> s'il a plus de 30 jours ;
+            <strong class="text-error">absent</strong> si le dossier Licensing est vide ou inexistant.
+            Le bouton <strong>Réparer</strong> propose <strong>deux gestes distincts</strong> : renouveler la
+            <strong>licence</strong> (jeton périmé) ou réparer l'<strong>identité</strong> (erreur d'authentification
+            alors que le jeton est valide). Purger un jeton déjà <strong>absent</strong> ne fait rien : l'utilisateur
+            doit rouvrir Office.
+            ⚠️ <strong>L'utilisateur doit être connecté, et Office fermé</strong> — les profils sont en UPD, donc son
+            profil n'existe sur l'hôte que pendant sa session ; c'est Office qui verrouille les fichiers, pas la session.
+            <strong>SCA désactivée</strong> = anomalie critique sur un serveur RDS.
+            Les serveurs <strong>sans Office</strong> et les agents <strong>hors ligne</strong> sont signalés et
+            exclus des totaux : la colonne <em>Données</em> dit si le relevé est actuel ou figé.
+        </div>
+    </div>
+
+    <!-- TABLEAU PAR HOTE -->
+    <div class="card">
+        <div class="row justify-between" style="margin-bottom:16px;">
+            {{ card_header('dns', 'Etat par serveur') }}
+            <div class="row gap-2" style="align-items:center;">
+                <span class="text-subtle" style="font-size:0.75rem;">Périmètre</span>
+                <select id="scope-select" class="form-control" style="width:auto; font-size:0.78rem; padding:4px 8px;"
+                        onchange="loadLicenses()">
+                    <option value="o365">Utilisateurs Office 365</option>
+                    <option value="all">Tous les profils</option>
+                </select>
+                <button class="btn-action btn-sm" onclick="loadLicenses()">
+                    <span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">refresh</span> Actualiser
+                </button>
+            </div>
+        </div>
+        <div id="scope-note" style="display:none; margin-bottom:14px; padding:10px 14px; border-radius:6px;
+             background:var(--slate-100); font-size:0.78rem;" class="text-subtle"></div>
+        <div id="licenses-loading" class="text-center text-muted" style="padding:32px; font-size:0.85rem;">
+            <span class="material-symbols-rounded" style="font-size:32px; display:block; margin-bottom:8px; animation:spin 1s linear infinite;">progress_activity</span>
+            Chargement des données…
+        </div>
+        <div id="licenses-table-wrap" style="display:none;">
+            <div class="table-toolbar">
+                <input type="text" class="form-control" placeholder="Filtrer les serveurs (RDSH01…)"
+                       data-filter-for="licenses-table"
+                       data-filter-hint="Ce champ filtre les SERVEURS — pour chercher une personne, utilisez « Recherche utilisateur » en haut de page.">
+            </div>
+            <div class="table-scroll">
+                <table id="licenses-table" data-enhance>
+                    <thead>
+                        <tr>
+                            <th data-sort="text">Serveur</th>
+                            <th class="text-center" data-sort="text">SCA</th>
+                            <th class="text-center text-success" data-sort="num">OK</th>
+                            <th class="text-center text-warning" data-sort="num">Périmés</th>
+                            <th class="text-center text-error" data-sort="num">Absents</th>
+                            <th data-sort="text">Office</th>
+                            <th data-sort="text">Données</th>
+                            <th data-no-sort></th>
+                        </tr>
+                    </thead>
+                    <tbody id="licenses-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div id="licenses-empty" class="text-center text-subtle" style="display:none; padding:32px; font-size:0.85rem;">
+            Aucune donnée disponible — les agents v2.9.0 n'ont pas encore envoyé de heartbeat.
+        </div>
+    </div>
+
+    <!-- PANNEAU DETAIL PAR HOTE (dépliable) -->
+    <div id="detail-panel" style="display:none; margin-top:20px;" class="card">
+        <div class="row justify-between" style="margin-bottom:16px;">
+            <h3 id="detail-title" style="margin:0; font-size:0.9rem;">Détail utilisateurs</h3>
+            <span class="material-symbols-rounded text-muted" style="cursor:pointer;" onclick="closeDetail()">close</span>
+        </div>
+        <div id="detail-users"></div>
+    </div>
+
+</div>
+
+<!-- MODALE RÉPARATION -->
+<div id="repair-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:999; align-items:center; justify-content:center;">
+    <div class="card" style="width:420px; max-width:90vw; padding:24px;">
+        <h3 style="margin:0 0 16px; font-size:0.95rem;">Réparer Office 365</h3>
+        <p class="text-subtle" style="font-size:0.8rem; margin-bottom:16px;">
+            Prérequis : <strong>session ouverte</strong> et <strong>Office fermé</strong>.
+            Sauvegarde automatique avant toute suppression, conservée 30 jours.
+        </p>
+        <div style="margin-bottom:12px;">
+            <label class="text-subtle" style="font-size:0.75rem;">Serveur</label>
+            <div id="repair-host" class="font-bold" style="font-size:0.9rem; margin-top:4px;"></div>
+        </div>
+        <div style="margin-bottom:12px;">
+            <label class="text-subtle" style="font-size:0.75rem;">Utilisateur</label>
+            <div id="repair-user" class="font-bold mono" style="font-size:0.9rem; margin-top:4px;"></div>
+        </div>
+        <div class="stack gap-2" style="margin-bottom:20px;">
+            <label class="text-subtle" style="font-size:0.75rem;">Geste à effectuer</label>
+            <label class="row gap-2" style="align-items:flex-start; cursor:pointer;">
+                <input type="radio" name="repair-kind" value="license" checked
+                       style="width:16px; height:16px; margin-top:2px;">
+                <span style="font-size:0.8rem;">
+                    <strong>Renouveler la licence</strong>
+                    <span class="text-subtle"> — le jeton a plus de 30 jours (colonne « périmé »).
+                    Purge le dossier <span class="mono">Licensing</span>.</span>
+                </span>
+            </label>
+            <label class="row gap-2" style="align-items:flex-start; cursor:pointer;">
+                <input type="radio" name="repair-kind" value="identity"
+                       style="width:16px; height:16px; margin-top:2px;">
+                <span style="font-size:0.8rem;">
+                    <strong>Réparer l'identité</strong>
+                    <span class="text-subtle"> — erreur d'authentification Office
+                    (<span class="mono">0x80070002</span>, tag <span class="mono">48v35</span>)
+                    alors que le jeton est valide. Ne touche pas à la licence.</span>
+                </span>
+            </label>
+            <label class="row gap-2" style="align-items:flex-start; cursor:pointer;">
+                <input type="radio" name="repair-kind" value="broker"
+                       style="width:16px; height:16px; margin-top:2px;">
+                <span style="font-size:0.8rem;">
+                    <strong>Réinitialiser le broker Azure AD</strong>
+                    <span class="text-subtle"> — tag <span class="mono">48v35</span> qui
+                    <em>persiste</em> après les deux gestes ci-dessus, avec
+                    <span class="mono">AADSTS50196</span> au diagnostic. Renomme les caches
+                    <span class="mono">OneAuth</span> et <span class="mono">TokenBroker</span>.
+                    L'utilisateur devra fermer puis rouvrir sa session.</span>
+                </span>
+            </label>
+        </div>
+        <div id="repair-result" style="display:none; padding:10px; border-radius:6px; font-size:0.8rem; margin-bottom:16px; white-space:pre-wrap; max-height:260px; overflow:auto;"></div>
+        <div class="row gap-2 justify-end">
+            <button class="btn-action" id="repair-diag-btn" onclick="runDiagnose()"
+                    title="Lecture seule : lit le journal Azure AD de l'hôte et nomme la cause réelle">
+                <span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">stethoscope</span> Diagnostiquer
+            </button>
+            <button class="btn-action" id="repair-cancel-btn" onclick="closeRepairModal()">Annuler</button>
+            <button class="btn-premium" id="repair-confirm-btn" onclick="confirmRepair()">
+                <span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">build</span> Réparer
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+.sca-ok { color:var(--success); font-weight:700; }
+.sca-disabled { color:var(--error); font-weight:700; }
+.sca-unknown { color:var(--slate-500); }
+.sca-absent { color:var(--slate-400); font-style:italic; }
+/* Hote muet ou sans Office : la ligne reste lisible mais visiblement en retrait,
+   pour qu'on ne lise pas ses chiffres comme une mesure du jour. */
+tr.row-inactive td { opacity:0.55; }
+.user-note { font-size:0.72rem; color:var(--slate-500); font-style:italic; }
+.user-row { display:flex; justify-content:space-between; align-items:center; padding:8px 12px;
+            border-bottom:1px solid var(--slate-100); font-size:0.8rem; }
+.user-row:last-child { border-bottom:none; }
+.badge-ok      { background:var(--success-light); color:var(--success); padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:700; }
+.badge-stale   { background:var(--warning-light); color:var(--warning); padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:700; }
+.badge-missing { background:var(--error-light);   color:var(--error);  padding:2px 8px; border-radius:12px; font-size:0.7rem; font-weight:700; }
+</style>
+
+<script>
+let _repairCtx = {};
+// Les hôtes sont conservés ici et référencés PAR INDEX depuis le HTML généré.
+// Interpoler l'objet (JSON.stringify) ou un nom de profil directement dans un
+// attribut onclick casse le balisage dès qu'une valeur contient une apostrophe.
+let _hosts = [];
+
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+        { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+    ));
+}
+
+/** Index utilisateur → hôte, reconstruit à chaque chargement.
+ *  ⚠️ On a longtemps cru qu'un utilisateur n'avait de profil que sur UN hôte
+ *  (« constaté sur les 48 profils de la ferme »). C'est FAUX : la mesure du
+ *  31/08/2026 sur l'historique complet montre des comptes présents sur
+ *  jusqu'à 7 hôtes — les 48 profils observés étaient une photo partielle, prise
+ *  à un instant où seuls les utilisateurs connectés étaient visibles.
+ *  L'index accepte donc bien plusieurs entrées par nom, et il le doit. */
+let _userIndex = [];
+
+function rebuildUserIndex() {
+    _userIndex = [];
+    _hosts.forEach((h, hostIdx) => {
+        if (h.office_installed === false) return;
+        (h.users || []).forEach((u, userIdx) => {
+            _userIndex.push({ name: u.name, status: u.status, age_days: u.age_days,
+                              host: h.hostname, online: h.agent_online,
+                              has_session: u.has_session, seen_on_hosts: u.seen_on_hosts,
+                              hostIdx, userIdx });
+        });
+    });
+}
+
+/** D — un bouton qui ne peut pas aboutir ne doit pas être cliquable (piège 24).
+ *  Une réparation exige que le profil soit MONTÉ, donc que l'utilisateur ait une
+ *  session ouverte sur cet hôte : les profils sont en UPD, `C:\\Users\\<user>`
+ *  n'existe que pendant la session. Sans ce garde-fou, le bouton partait et
+ *  l'agent répondait « Profil introuvable » 90 s plus tard — un message qui
+ *  envoie chercher le problème là où il n'est pas.
+ *  ⚠️ On dit POURQUOI c'est grisé : un bouton inerte sans explication est pire
+ *  qu'un bouton qui échoue. */
+function repairButton(hostIdx, userIdx, canRepair, agentOnline) {
+    const why = !agentOnline
+        ? "agent hors ligne — aucune commande ne peut être exécutée"
+        : "session fermée : le profil n'est pas monté sur cet hôte (UPD). "
+          + "Demander à l'utilisateur d'ouvrir sa session et de fermer Office.";
+    if (canRepair && agentOnline) {
+        return `<button class="btn-action btn-sm text-warning" onclick="openRepairModal(${hostIdx}, ${userIdx})">
+            <span class="material-symbols-rounded" style="font-size:13px; vertical-align:middle;">build</span> Réparer
+        </button>`;
+    }
+    return `<button class="btn-action btn-sm" disabled title="${esc(why)}"
+        style="opacity:0.5; cursor:not-allowed;">
+        <span class="material-symbols-rounded" style="font-size:13px; vertical-align:middle;">build</span> Réparer
+    </button>
+    <span class="user-note" style="display:block;">${esc(why)}</span>`;
+}
+
+function renderUserSearch() {
+    const q = document.getElementById('user-search').value.trim().toLowerCase();
+    const wrap = document.getElementById('user-search-results');
+    if (q.length < 2) { wrap.innerHTML = ''; return; }
+    const hits = _userIndex.filter(e => e.name.toLowerCase().includes(q));
+    if (!hits.length) {
+        wrap.innerHTML = `<div class="text-subtle" style="font-size:0.8rem; padding:8px 2px;">
+            Aucun profil « ${esc(q)} » sur la ferme — l'utilisateur ne s'est jamais connecté
+            à un serveur RDS avec Office, ou son profil est inactif depuis plus de 45 jours.</div>`;
+        return;
+    }
+    wrap.innerHTML = hits.map(e => {
+        const badgeClass = e.status === 'ok' ? 'badge-ok' : e.status === 'stale' ? 'badge-stale' : 'badge-missing';
+        const badgeLabel = e.status === 'ok' ? `OK (${esc(e.age_days)}j)` : e.status === 'stale' ? `PÉRIMÉ (${esc(e.age_days)}j)` : 'ABSENT';
+        let action = '';
+        // Un jeton OK n'exclut PAS une panne Office : le cache d'identite
+        // (0x80070002) casse avec un jeton valide — cas du 31/08 et du 08/09.
+        // Reserver le bouton au statut PERIME rendait ce geste injoignable
+        // exactement quand il sert (piege 34).
+        if (e.status === 'stale' || e.status === 'ok') {
+            action = repairButton(e.hostIdx, e.userIdx, e.has_session, e.online !== false);
+        } else if (e.status === 'missing') {
+            action = '<span class="user-note">l\'utilisateur doit ouvrir Office sur ce serveur</span>';
+        }
+        return `<div class="user-row">
+            <div class="row gap-3">
+                <span class="material-symbols-rounded text-subtle" style="font-size:18px;">person</span>
+                <span class="mono">${esc(e.name)}</span>
+                <span class="text-subtle" style="font-size:0.75rem;">sur <strong>${esc(e.host)}</strong>${e.online ? '' : ' <span class="text-warning">(agent hors ligne — dernière valeur connue)</span>'}</span>
+            </div>
+            <div class="row gap-3"><span class="${badgeClass}">${badgeLabel}</span>${action}${seenNote(e)}</div>
+        </div>`;
+    }).join('');
+}
+
+/** Profil UPD = un seul disque : la vue ne sert que l'observation la plus récente
+ *  d'une personne, tous hôtes confondus (2.29.4). On cite les autres hôtes où
+ *  elle a été vue pour qu'une ligne « disparue » d'un hôte ne se lise pas comme
+ *  une donnée perdue. */
+function seenNote(u) {
+    const hosts = (u.seen_on_hosts || []).filter(h => h !== (u.host || u.hostname));
+    if (!hosts.length) return '';
+    return `<span class="user-note" title="Profil itinérant (UPD) : une seule copie, observée en dernier ici">aussi vu sur ${esc(hosts.join(', '))}</span>`;
+}
+
+/** Fraîcheur de la donnée : le snapshot en base ne bouge qu'au CHANGEMENT,
+ *  c'est le heartbeat de l'agent qui dit si la mesure est encore d'actualité. */
+function freshnessCell(h) {
+    const changed = h.recorded_at ? new Date(h.recorded_at).toLocaleString('fr-FR') : 'N/A';
+    if (h.agent_online) {
+        const age = h.agent_age_seconds;
+        return `<span class="text-subtle" title="Dernier changement enregistré : ${esc(changed)}">à jour${
+            age != null ? ` · agent ${age}s` : ''}</span>`;
+    }
+    return `<span class="text-warning" title="Dernier changement enregistré : ${esc(changed)}">figé · ${esc(changed)}</span>`;
+}
+
+/** Dit ce que le périmètre ÉCARTE, et quand il ne peut rien dire.
+ *  Un filtre muet est un filtre qui ment : on affiche toujours le nombre de
+ *  profils retirés et la raison, et on prévient explicitement quand la flotte
+ *  est trop ancienne pour fournir le DN (sans DN, tout retombe en « hors AD »
+ *  et le périmètre n'a aucun sens). */
+function renderScopeNote(data) {
+    const el = document.getElementById('scope-note');
+    if (!el) return;
+    const c = data.scope_counts || {};
+    if (data.dn_available === false) {
+        el.style.display = 'block';
+        el.innerHTML = '⚠️ <strong>Périmètre indisponible</strong> — les agents de cette flotte ne remontent pas '
+            + "encore l'unité d'organisation AD (agent 2.29.0 requis). Tous les profils sont affichés.";
+        return;
+    }
+    if ((data.scope || 'o365') === 'all') {
+        el.style.display = 'block';
+        el.innerHTML = `Tous les profils. Dans le périmètre Office 365 : <strong>${c.o365 || 0}</strong> · `
+            + `hors périmètre OU : <strong>${c.hors_perimetre || 0}</strong> · `
+            + `OU exclue : <strong>${c.exclu || 0}</strong> · inconnus de l'AD : <strong>${c.hors_ad || 0}</strong>.`;
+        return;
+    }
+    const ecartes = (c.hors_perimetre || 0) + (c.exclu || 0);
+    el.style.display = 'block';
+    let txt = data.scope_ou
+        ? `Périmètre <strong>${esc(data.scope_ou)}</strong> — `
+          + `<strong>${ecartes}</strong> profil(s) écarté(s) : ${c.hors_perimetre || 0} hors périmètre, `
+          + `${c.exclu || 0} en OU exclue. Basculer sur « Tous les profils » pour les voir.`
+        : `Aucun périmètre OU configuré : tous les profils sont suivis`
+          + (c.exclu ? ` (${c.exclu} en OU exclue).` : `.`);
+    if (c.hors_ad) {
+        txt += ` <br>⚠️ <strong>${c.hors_ad}</strong> profil(s) au périmètre <strong>indéterminé</strong> `
+            + `(unité d'organisation pas encore remontée) sont <strong>conservés</strong> : on ne filtre pas `
+            + `sur un critère non mesuré. Se résorbe à mesure que les utilisateurs rouvrent une session.`;
+    }
+    el.innerHTML = txt;
+}
+
+function loadLicenses() {
+    document.getElementById('licenses-loading').style.display = 'block';
+    document.getElementById('licenses-table-wrap').style.display = 'none';
+    document.getElementById('licenses-empty').style.display = 'none';
+
+    const scope = (document.getElementById('scope-select') || {}).value || 'o365';
+    fetch(`/api/licenses?scope=${encodeURIComponent(scope)}`)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('licenses-loading').style.display = 'none';
+            renderScopeNote(data);
+            const hosts = data.hosts || [];
+            const totals = data.totals || {};
+            document.getElementById('total-ok').textContent      = totals.ok      ?? '—';
+            document.getElementById('total-stale').textContent   = totals.stale   ?? '—';
+            document.getElementById('total-missing').textContent = totals.missing  ?? '—';
+            document.getElementById('total-hosts').textContent   = hosts.length;
+
+            if (!hosts.length) {
+                const empty = document.getElementById('licenses-empty');
+                // Réécrit à chaque fois : le bloc sert aussi aux erreurs réseau.
+                empty.textContent = "Aucune donnée disponible — aucun agent n'a encore envoyé de relevé de licences.";
+                empty.style.display = 'block';
+                return;
+            }
+            _hosts = hosts;
+            rebuildUserIndex();
+            renderUserSearch();   // rafraîchit un résultat affiché (ex : après réparation)
+            const tbody = document.getElementById('licenses-tbody');
+            tbody.innerHTML = '';
+            hosts.forEach((h, idx) => {
+                const noOffice = h.office_installed === false;
+                const stale   = Number(h.users_stale   || 0);
+                const missing = Number(h.users_missing  || 0);
+                const ok      = Number(h.users_ok       || 0);
+
+                let scaClass, scaLabel;
+                if (noOffice) {
+                    // Ni « activée » ni « ? » : il n'y a pas d'Office à licencier sur cet hôte.
+                    scaClass = 'sca-absent'; scaLabel = 'sans Office';
+                } else if (h.sca_status === 'ok') {
+                    scaClass = 'sca-ok'; scaLabel = 'ACTIVEE';
+                } else if (h.sca_status === 'disabled') {
+                    scaClass = 'sca-disabled'; scaLabel = 'DESACTIVEE ⚠';
+                } else {
+                    scaClass = 'sca-unknown'; scaLabel = '?';
+                }
+
+                // Un hôte sans Office n'a pas d'anomalie de jeton : afficher « — »
+                // plutôt que des compteurs rouges qui n'ont aucun sens.
+                const cell = (n, cls) => noOffice
+                    ? '<td class="text-center text-muted">—</td>'
+                    : `<td class="text-center ${n ? cls : 'text-muted'}">${n}</td>`;
+
+                const tr = document.createElement('tr');
+                tr.className = 'lic-row' + ((noOffice || !h.agent_online) ? ' row-inactive' : '');
+                tr.innerHTML = `
+                    <td class="font-bold">${esc(h.hostname)}${
+                        h.agent_online ? '' : ' <span class="text-warning" title="Agent hors ligne — dernière valeur connue">⚠</span>'}</td>
+                    <td class="text-center ${scaClass}">${scaLabel}</td>
+                    ${noOffice ? '<td class="text-center text-muted">—</td>' : `<td class="text-center text-success font-bold">${ok}</td>`}
+                    ${cell(stale, 'text-warning font-bold')}
+                    ${cell(missing, 'text-error font-bold')}
+                    <td class="text-muted" style="font-size:0.75rem;">${esc(h.office_version || '—')}</td>
+                    <td style="font-size:0.72rem;">${freshnessCell(h)}</td>
+                    <td>
+                        <button class="btn-action btn-sm" onclick="showDetail(${idx})">
+                            <span class="material-symbols-rounded" style="font-size:13px; vertical-align:middle;">expand_more</span> Détail
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            document.getElementById('licenses-table-wrap').style.display = 'block';
+        })
+        .catch((e) => {
+            // Ne pas afficher « aucun agent n'a envoyé de heartbeat » sur une simple
+            // erreur réseau : c'est un diagnostic faux, qui envoie chercher le
+            // problème du côté de la ferme au lieu du dashboard.
+            document.getElementById('licenses-loading').style.display = 'none';
+            const empty = document.getElementById('licenses-empty');
+            empty.textContent = `Impossible de récupérer les licences (${e.message || e}). `
+                + `Vérifier que l'AgentMaster répond, puis Actualiser.`;
+            empty.style.display = 'block';
+        });
+}
+
+function showDetail(idx) {
+    const host = _hosts[idx];
+    if (!host) return;
+    const panel = document.getElementById('detail-panel');
+    document.getElementById('detail-title').textContent = `Détail utilisateurs — ${host.hostname}`;
+    const users = host.users || [];
+    const wrap = document.getElementById('detail-users');
+
+    if (host.office_installed === false) {
+        wrap.innerHTML = '<div class="text-subtle" style="padding:16px; font-size:0.8rem;">'
+            + 'Office n\'est pas installé sur cet hôte — aucun jeton de licence à suivre.</div>';
+    } else if (!users.length) {
+        wrap.innerHTML = '<div class="text-subtle" style="padding:16px; font-size:0.8rem;">Aucun profil actif relevé.</div>';
+    } else {
+        const staleNote = host.agent_online ? ''
+            : '<div class="text-warning" style="padding:10px 12px; font-size:0.75rem;">'
+              + 'Agent hors ligne : ces valeurs sont les dernières connues, pas une mesure actuelle.</div>';
+        wrap.innerHTML = staleNote + users.map((u, uIdx) => {
+            const badgeClass = u.status === 'ok' ? 'badge-ok' : u.status === 'stale' ? 'badge-stale' : 'badge-missing';
+            const badgeLabel = u.status === 'ok' ? 'OK' : u.status === 'stale' ? `PÉRIMÉ (${esc(u.age_days)}j)` : 'ABSENT';
+            // Purger un jeton ABSENT est un no-op : le dossier Licensing n'existe pas.
+            // Le seul remède est que l'utilisateur ouvre Office pour en obtenir un.
+            let action = '';
+            // Jeton OK = bouton quand meme : la reparation d'identite existe pour ce cas (piege 34).
+            if (u.status === 'stale' || u.status === 'ok') {
+                action = repairButton(idx, uIdx, u.has_session, host.agent_online !== false);
+            } else if (u.status === 'missing') {
+                action = '<span class="user-note">l\'utilisateur doit ouvrir Office</span>';
+            }
+            action += seenNote(Object.assign({ host: host.hostname }, u));
+            return `<div class="user-row">
+                <div class="row gap-3">
+                    <span class="material-symbols-rounded text-subtle" style="font-size:18px;">person</span>
+                    <span class="mono">${esc(u.name)}</span>
+                </div>
+                <div class="row gap-3">
+                    <span class="${badgeClass}">${badgeLabel}</span>
+                    ${action}
+                </div>
+            </div>`;
+        }).join('');
+    }
+    panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeDetail() {
+    document.getElementById('detail-panel').style.display = 'none';
+}
+
+const REPAIR_BTN_HTML =
+    '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">build</span> Réparer';
+
+function openRepairModal(hostIdx, userIdx) {
+    const host = _hosts[hostIdx];
+    const user = host && (host.users || [])[userIdx];
+    if (!host || !user) return;
+    _repairCtx = { hostname: host.hostname, user: user.name };
+    // textContent : jamais d'injection, quel que soit le nom du profil.
+    document.getElementById('repair-host').textContent = host.hostname;
+    document.getElementById('repair-user').textContent = user.name;
+    // La modale est reutilisee d'un utilisateur a l'autre : on repart toujours
+    // du geste coherent avec ce que la page AFFICHE, jamais du choix precedent.
+    // Jeton perime -> renouveler la licence ; jeton OK -> le seul geste qui a
+    // un sens est la reparation d'identite (renouveler un jeton valide ne
+    // repare rien, cf. REX 31/08 : « reparation reussie » qui ne resout pas).
+    const defaultKind = (user.status === 'ok') ? 'identity' : 'license';
+    document.querySelectorAll('input[name="repair-kind"]').forEach(r => {
+        r.checked = (r.value === defaultKind);
+        r.disabled = false;
+    });
+    document.getElementById('repair-result').style.display = 'none';
+    // Réinitialiser complètement les boutons : la modale est réutilisée d'un
+    // utilisateur à l'autre, et sans ce reset elle rouvrait dans l'état terminal
+    // de la réparation précédente.
+    const btn = document.getElementById('repair-confirm-btn');
+    btn.disabled = false;
+    btn.innerHTML = REPAIR_BTN_HTML;
+    btn.onclick = confirmRepair;
+    const cancel = document.getElementById('repair-cancel-btn');
+    cancel.style.display = '';
+    cancel.textContent = 'Annuler';
+    // Le diagnostic reste disponible tant que la modale est ouverte : il est en
+    // lecture seule, et c'est justement ce qu'on veut pouvoir relancer apres
+    // une reparation restee sans effet.
+    const diag = document.getElementById('repair-diag-btn');
+    diag.disabled = false;
+    diag.innerHTML = DIAG_BTN_HTML;
+    document.getElementById('repair-modal').style.display = 'flex';
+}
+
+function closeRepairModal() {
+    document.getElementById('repair-modal').style.display = 'none';
+}
+
+/** État terminal « réussi » : la purge est faite, il n'y a plus rien à confirmer.
+ *  Laisser un bouton « Réparer » (même désactivé) et un « Annuler » suggère à tort
+ *  qu'on peut relancer ou annuler l'opération. On ne propose donc plus qu'une
+ *  sortie, qui rafraîchit le tableau au passage. */
+function _repairDone() {
+    const btn = document.getElementById('repair-confirm-btn');
+    btn.disabled = false;
+    btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">check</span> Fermer';
+    btn.onclick = () => { closeRepairModal(); loadLicenses(); };
+    document.getElementById('repair-cancel-btn').style.display = 'none';
+    // Le choix du geste n'a plus d'effet une fois la commande partie.
+    document.querySelectorAll('input[name="repair-kind"]').forEach(r => { r.disabled = true; });
+    // ... mais le diagnostic, lui, reste ouvert : c'est apres une reparation
+    // "reussie" et sans effet qu'on a le plus besoin de lire la vraie cause.
+    document.getElementById('repair-diag-btn').disabled = false;
+}
+
+function _setRepairResult(ok, text) {
+    const el = document.getElementById('repair-result');
+    el.style.display = 'block';
+    el.style.background = ok ? 'var(--success-light)' : 'var(--error-light)';
+    el.style.color = ok ? 'var(--success)' : 'var(--error)';
+    el.textContent = text;
+}
+
+async function pollRepair(cmdId) {
+    const btn = document.getElementById('repair-confirm-btn');
+    let attempts = 0;
+    const t = setInterval(async () => {
+        attempts++;
+        // Timeout 60s (30 × 2s) — le repair peut prendre quelques secondes
+        if (attempts > 30) {
+            clearInterval(t);
+            _setRepairResult(false, 'Délai dépassé — vérifiez les logs de l\'agent.');
+            btn.disabled = false;
+            btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">build</span> Réessayer';
+            return;
+        }
+        try {
+            const r = await fetch(`/api/command-status/${cmdId}`);
+            if (!r.ok) return;
+            const d = await r.json();
+            if (d.status === 'success') {
+                clearInterval(t);
+                _setRepairResult(true, '✓ ' + (d.result || 'Réparation effectuée avec succès.'));
+                _repairDone();
+                loadLicenses();
+            } else if (d.status === 'error') {
+                clearInterval(t);
+                _setRepairResult(false, '✗ ' + (d.result || 'Erreur inconnue.'));
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">build</span> Réessayer';
+            }
+            // status === 'pending' → on continue à poller
+        } catch (_) { /* ignore erreur transitoire */ }
+    }, 2000);
+}
+
+function confirmRepair() {
+    const btn = document.getElementById('repair-confirm-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle; animation:spin 1s linear infinite;">progress_activity</span> Envoi…';
+    const res = document.getElementById('repair-result');
+    res.style.display = 'none';
+
+    fetch('/api/licenses/repair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            hostname: _repairCtx.hostname,
+            user: _repairCtx.user,
+            kind: (document.querySelector('input[name="repair-kind"]:checked') || {}).value || 'license'
+        })
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.status === 'queued') {
+            const cmdId = d.command?.id;
+            if (!cmdId) {
+                _setRepairResult(false, 'Commande mise en file mais ID manquant.');
+                btn.disabled = false;
+                return;
+            }
+            btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle; animation:spin 1s linear infinite;">progress_activity</span> En attente de l\'agent…';
+            _setRepairResult(true, `⏳ Commande en attente (id: ${cmdId}) — l'agent répond dans ~10s…`);
+            pollRepair(cmdId);
+        } else {
+            _setRepairResult(false, `Erreur : ${d.error || JSON.stringify(d)}`);
+            btn.disabled = false;
+            btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">build</span> Réessayer';
+        }
+    })
+    .catch(e => {
+        _setRepairResult(false, `Erreur réseau : ${e}`);
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">build</span> Réessayer';
+    });
+}
+
+const DIAG_BTN_HTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">stethoscope</span> Diagnostiquer';
+
+/** Diagnostic Office : LECTURE SEULE sur l'hôte.
+ *  Raison d'être (23/09/2026) : deux réparations ont été passées à l'aveugle sur
+ *  le même utilisateur, toutes deux "réussies", sans le moindre effet — la cause était
+ *  AADSTS50196 côté Azure AD, lisible nulle part dans l'outil. Tant que la page ne
+ *  savait afficher qu'un âge de jeton, elle ne pouvait accuser que le jeton. */
+function runDiagnose() {
+    const btn = document.getElementById('repair-diag-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle; animation:spin 1s linear infinite;">progress_activity</span> Lecture…';
+    fetch('/api/licenses/diagnose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostname: _repairCtx.hostname, user: _repairCtx.user, hours: 6 })
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.status === 'queued' && d.command && d.command.id) {
+            _setRepairResult(true, '⏳ Lecture du journal Azure AD de ' + _repairCtx.hostname + '…');
+            pollDiagnose(d.command.id);
+        } else {
+            _setRepairResult(false, 'Erreur : ' + (d.error || JSON.stringify(d)));
+            btn.disabled = false;
+            btn.innerHTML = DIAG_BTN_HTML;
+        }
+    })
+    .catch(e => {
+        _setRepairResult(false, 'Erreur réseau : ' + e);
+        btn.disabled = false;
+        btn.innerHTML = DIAG_BTN_HTML;
+    });
+}
+
+function pollDiagnose(cmdId) {
+    const btn = document.getElementById('repair-diag-btn');
+    let attempts = 0;
+    const t = setInterval(async () => {
+        attempts++;
+        if (attempts > 30) {
+            clearInterval(t);
+            _setRepairResult(false, "Délai dépassé — l'agent n'a pas répondu.");
+            btn.disabled = false; btn.innerHTML = DIAG_BTN_HTML;
+            return;
+        }
+        try {
+            const r = await fetch(`/api/command-status/${cmdId}`);
+            if (!r.ok) return;
+            const d = await r.json();
+            if (d.status === 'success') {
+                clearInterval(t);
+                _setRepairResult(true, d.result || 'Aucun événement.');
+                btn.disabled = false; btn.innerHTML = DIAG_BTN_HTML;
+            } else if (d.status === 'error') {
+                clearInterval(t);
+                _setRepairResult(false, '✗ ' + (d.result || 'Erreur inconnue.'));
+                btn.disabled = false; btn.innerHTML = DIAG_BTN_HTML;
+            }
+        } catch (_) { /* transitoire */ }
+    }, 2000);
+}
+
+// Fermer la modale sur clic extérieur
+document.getElementById('repair-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeRepairModal();
+});
+
+document.getElementById('user-search').addEventListener('input', renderUserSearch);
+
+loadLicenses();
+</script>
+{% endblock %}

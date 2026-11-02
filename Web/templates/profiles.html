@@ -1,0 +1,932 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header, stat_card %}
+
+{% block title %}Volumétrie Profils R:{% endblock %}
+{% block page_title %}Gestion Centralisée Volumétrie Profils{% endblock %}
+
+{% block content %}
+<div id="section-profiles" class="content-section">
+    <!-- HEADER DATA POINTS: Statistiques Disque R: -->
+    <div class="stat-strip" style="margin-bottom:24px;">
+        {{ stat_card('storage', 'TOTAL', '---', 'bg-primary-soft', 'stat-total-gb') }}
+        {{ stat_card('database', 'UTILISÉ', '---', 'bg-error-soft', 'stat-used-gb') }}
+        {{ stat_card('check_circle', 'LIBRE', '---', 'bg-success-soft', 'stat-free-gb') }}
+        {{ stat_card('bar_chart', '% UTILISÉ', '---', 'bg-warning-soft', 'stat-percent-used') }}
+    </div>
+
+    <!-- BARRE VISUELLE UTILISATION DISQUE -->
+    <div style="margin-bottom:24px;">
+        <div class="progress-container">
+            <div id="disk-usage-bar" class="progress-bar" style="width:0%; background:linear-gradient(90deg, var(--accent-primary) 0%, var(--warning) 70%, var(--error) 100%);"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="row justify-between" style="margin-bottom:24px;">
+            <h3 class="row gap-3" style="margin:0;">
+                <span class="material-symbols-rounded text-accent" style="font-size:28px;">person_4</span>
+                <span id="profiles-count-title">Profils Utilisateurs</span>
+            </h3>
+            <button class="btn-premium" onclick="refreshDiskInfo()" title="Actualiser (recalcul du cache)">
+                <span class="material-symbols-rounded">refresh</span> ACTUALISER
+            </button>
+        </div>
+
+        <div class="text-subtle font-semibold" style="background:var(--slate-50); padding:12px 20px; border-radius:12px; font-size:0.8rem; margin-bottom:24px;">
+            <span class="material-symbols-rounded" style="font-size:16px; vertical-align:middle; margin-right:4px;">info</span>
+            Gestion centralisée de la volumétrie des profils utilisateurs sur le disque R: du broker. <strong id="profiles-location">Chargement...</strong>
+        </div>
+
+        <div id="agent-offline-banner" class="notice notice-warning" style="display:none; margin-bottom:16px;"></div>
+
+        <!-- NETTOYAGE DES TÉLÉCHARGEMENTS -->
+        <div class="card" style="margin-bottom:24px;">
+            {{ card_header('cleaning_services', 'Nettoyage des téléchargements', 'text-warning') }}
+            <p class="text-subtle" style="font-size:0.8rem; margin-bottom:14px;">
+                Supprime le contenu des dossiers <strong>Téléchargement</strong> des profils, plus ancien que le
+                seuil choisi. Un élément n'est retenu que si sa date de <strong>création ET</strong> de
+                <strong>modification</strong> sont antérieures au seuil — un fichier récemment modifié n'est
+                jamais supprimé. Le dossier lui-même est conservé.
+                <br><strong class="text-warning">Simulation obligatoire avant tout nettoyage réel.</strong>
+            </p>
+            <div class="row gap-3 flex-wrap" style="margin-bottom:12px;">
+                <label class="text-subtle" style="font-size:0.8rem;">Plus ancien que
+                    <input type="number" id="dl-days" class="form-control" value="14" min="1" max="365"
+                           style="width:90px; display:inline-block; margin:0 6px;"> jours
+                </label>
+                <button class="btn-action" id="dl-sim-btn" onclick="downloadsCleanup(true)">
+                    <span class="material-symbols-rounded" style="font-size:15px; vertical-align:middle;">search</span> SIMULER
+                </button>
+                <button class="btn-premium btn-error" id="dl-clean-btn" onclick="downloadsCleanup(false)" disabled
+                        title="Lancez d'abord une simulation">
+                    <span class="material-symbols-rounded" style="font-size:15px; vertical-align:middle;">delete_sweep</span> NETTOYER
+                </button>
+            </div>
+            <div id="dl-result" style="display:none;"></div>
+        </div>
+
+        <!-- ACTIONS BULK -->
+        <div id="bulk-actions-bar" class="row justify-between" style="display:none; background:var(--accent-primary); padding:16px 20px; border-radius:12px; margin-bottom:16px; color:white;">
+            <span id="bulk-selection-count" class="font-semibold">0 profil(s) sélectionné(s)</span>
+            <div class="row gap-3">
+                <button class="btn-action btn-sm" style="background:white; color:var(--accent-primary); border:none;" onclick="selectAllProfiles()">
+                    SÉLECTIONNER TOUT
+                </button>
+                <button class="btn-action btn-sm" style="background:white; color:var(--accent-primary); border:none;" onclick="deselectAllProfiles()">
+                    DÉSÉLECTIONNER
+                </button>
+                <button class="btn-action btn-sm btn-error" onclick="confirmBulkClean()">
+                    <span class="material-symbols-rounded" style="font-size:18px; vertical-align:middle;">delete_outline</span> NETTOYER SÉLECTION
+                </button>
+            </div>
+        </div>
+
+        <!-- TABLEAU PROFILS AVEC SÉLECTION -->
+        <div class="table-toolbar row justify-between">
+            <input type="text" class="form-control" placeholder="Filtrer les profils..." data-filter-for="profiles-table">
+            <div class="row gap-3">
+                <!-- Fraîcheur de la mesure : un volume sans sa date d'observation
+                     ne dit pas s'il date de cette nuit ou d'il y a trois jours. -->
+                <span id="sizes-freshness" class="text-subtle" style="font-size:0.8rem;"></span>
+                <button class="btn-action btn-sm" id="scan-sizes-btn" onclick="scanProfileSizes()"
+                        title="Recalcule la taille de chaque profil (~40 s). Sinon, scan automatique à 03h00.">
+                    <span class="material-symbols-rounded" style="font-size:18px; vertical-align:middle;">refresh</span>
+                    SCANNER MAINTENANT
+                </button>
+            </div>
+        </div>
+        <div class="table-scroll">
+            <table id="profiles-table" data-enhance>
+                <thead>
+                    <tr>
+                        <th class="text-center" data-no-sort style="width:40px;"><input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()" title="Sélectionner tous"></th>
+                        <th data-sort="text" style="width:35%;">NOM PROFIL</th>
+                        <th class="text-right" data-sort="num" style="width:20%;">TAILLE</th>
+                        <th class="text-center" data-sort="num" style="width:20%;">% DISQUE</th>
+                        <th class="text-right" data-no-sort style="width:25%;">ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody id="profiles-body">
+                    <tr><td colspan="5" class="text-center text-muted" style="padding:40px;">Chargement des profils en cours...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL ANALYSE DÉTAILLÉE -->
+<div id="analysis-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div class="card" style="max-width:700px; max-height:80vh; overflow-y:auto; width:90vw;">
+        <div class="row justify-between" style="margin-bottom:20px;">
+            <h3 id="modal-title" style="margin:0;">Analyse de Répartition</h3>
+            <button onclick="closeAnalysisModal()" class="text-muted" style="background:none; border:none; font-size:24px; cursor:pointer;" title="Fermer">✕</button>
+        </div>
+
+        <p id="modal-info" class="text-subtle font-semibold" style="margin:0 0 20px 0;"></p>
+
+        <div id="modal-content" class="text-strong"></div>
+
+        <div class="row" style="margin-top:20px;">
+            <button onclick="closeAnalysisModal()" class="btn-action" style="flex:1;">FERMER</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const BROKER = {{ broker_host | tojson }};
+    // Masquer la liste déroulante serveur (pas utile pour cette page centralisée R:)
+    document.addEventListener('DOMContentLoaded', () => {
+        const selectorContainer = document.getElementById('global-selector-container');
+        if (selectorContainer) {
+            selectorContainer.style.display = 'none';
+        }
+    });
+    
+    // ARCHITECTURE: Centralisée sur R: du broker (pas de sélection serveur)
+    // Endpoint: /api/profiles-disk-info retourne tous les profils du R:
+    
+    let allProfiles = [];
+    let selectedProfiles = new Set();
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadDiskInfo();
+    });
+
+    /** Libelle honnete : la page annoncait « Disque R: - N profils » quel que soit
+     *  l'emplacement REELLEMENT enumere par l'agent. Or la volumetrie affichee
+     *  au-dessus est celle de R:, et la liste pouvait venir de C:\Users — deux
+     *  disques differents presentes comme un seul (constate 31/07/2026). On nomme
+     *  la source renvoyee par l'API plutot que de la supposer.
+     */
+    function profilesLocationLabel(data) {
+        const n = data.total_profiles || 0;
+        const where = data.profiles_source || 'emplacement non precise (agent a mettre a jour)';
+        return `${where} — ${n} profil(s)` + (data.note ? ` — ${data.note}` : '');
+    }
+
+
+    // --- Fraîcheur et relance du scan de tailles ----------------------------
+    /**
+     * Le calcul des tailles coûte ~40 s : il tourne une fois par nuit (03h00), et
+     * le résultat est persisté côté agent depuis 2.24. Avant ça, tout redémarrage
+     * d'agent remettait les 101 profils à « SCAN REQUIS / 0,00 % » jusqu'au
+     * lendemain — sans aucun moyen de forcer la mesure depuis l'interface :
+     * l'action `scan_profiles_sizes` existait côté serveur mais n'était câblée
+     * sur aucun bouton. Constaté le 31/07/2026 après le déploiement de 19h23.
+     */
+    /**
+     * Agent broker hors-ligne : on VERROUILLE les actions R:.
+     * Sans ça, la page laisse lancer une commande qui restera `pending` pour
+     * toujours, puis affiche « Délai dépassé — voir les logs de l'agent » au bout
+     * de 90 s. Le conseil est faux : le problème n'est pas dans les logs, c'est
+     * qu'aucun agent n'écoute. Constaté le 31/07/2026, agent broker tombé.
+     */
+    let _brokerOnline = true;
+    let _brokerBusy = null;
+
+    /** Les boutons PAR LIGNE (analyser, nettoyer, simuler) parlent eux aussi à
+     *  l'agent. Ils restaient cliquables alors que SIMULER/NETTOYER/SCANNER
+     *  étaient verrouillés : on cliquait, un toast disait « Analyse en cours… »
+     *  et le modal ne s'ouvrait jamais — la commande dormait en file (constaté
+     *  le 27/08). Un bouton qui ne peut pas aboutir ne doit pas être cliquable. */
+    function setRowActionsEnabled(enabled) {
+        document.querySelectorAll('#profiles-body button').forEach(b => {
+            b.disabled = !enabled;
+            b.title = enabled ? (b.dataset.title || b.title || '')
+                              : "Agent " + BROKER + " hors-ligne — action impossible";
+        });
+    }
+
+    function renderAgentState(data) {
+        _brokerOnline = data.agent_online !== false;
+        _brokerBusy = data.agent_busy || null;
+        const banner = document.getElementById('agent-offline-banner');
+        const ids = ['dl-sim-btn', 'dl-clean-btn', 'scan-sizes-btn'];
+        if (_brokerOnline) {
+            ids.forEach(id => {
+                const b = document.getElementById(id);
+                if (!b) return;
+                b.title = '';
+                // NETTOYER garde son propre verrou : simulation obligatoire.
+                if (id !== 'dl-clean-btn' || _dlSimulated) b.disabled = false;
+            });
+            // « Occupé » n'est pas « mort » : l'agent digère une file, les actions
+            // partent mais seront traitées à la suite. On le dit au lieu de laisser
+            // croire à une page figée (bandeau neutre, pas d'alarme).
+            if (banner) {
+                if (_brokerBusy) {
+                    banner.style.display = 'block';
+                    banner.innerText = `Agent ${BROKER} occupé — ${_brokerBusy.remaining} commande(s) en file`
+                        + (_brokerBusy.current ? ` (en cours : ${_brokerBusy.current})` : '')
+                        + " — une action lancée maintenant sera traitée à la suite.";
+                } else {
+                    banner.style.display = 'none';
+                }
+            }
+            setRowActionsEnabled(true);
+            return;
+        }
+        setRowActionsEnabled(false);
+        const mins = data.agent_age_seconds ? Math.floor(data.agent_age_seconds / 60) : null;
+        if (banner) {
+            banner.style.display = 'block';
+            banner.innerText = "Agent " + BROKER + " hors-ligne"
+                + (mins !== null ? ` depuis ${mins} min` : '')
+                + " — les chiffres ci-dessous datent du dernier heartbeat, et aucune "
+                + "action sur R: ne peut aboutir tant qu'il n'a pas repris.";
+        }
+        ids.forEach(id => {
+            const b = document.getElementById(id);
+            if (!b) return;
+            b.disabled = true;
+            b.title = "Agent " + BROKER + " hors-ligne — action impossible";
+        });
+    }
+
+    function renderSizesFreshness(data) {
+        const el = document.getElementById('sizes-freshness');
+        if (!el) return;
+        const pending = data.sizes_pending || 0;
+        if (data.sizes_scanned_at) {
+            // Deux dates, deux significations : la mesure (scan complet) et
+            // l'ajustement (décrément après un nettoyage, sans remesure du reste
+            // du profil). Les confondre ferait passer une valeur dérivée pour
+            // une mesure fraîche — un chiffre doit porter la date de ce qu'il est.
+            el.innerText = `Tailles mesurées le ${data.sizes_scanned_at}`
+                         + (data.sizes_adjusted_at
+                             ? ` — ajustées après nettoyage le ${data.sizes_adjusted_at}` : '')
+                         + (pending ? ` — ${pending} profil(s) en attente` : '');
+        } else {
+            el.innerText = pending
+                ? `Tailles non mesurées (${pending} profil(s)) — scan auto à 03h00`
+                : '';
+        }
+    }
+
+    async function scanProfileSizes() {
+        const btn = document.getElementById('scan-sizes-btn');
+        const el = document.getElementById('sizes-freshness');
+        btn.disabled = true;
+        el.innerText = 'Scan en cours — ~40 s pour 101 profils…';
+        try {
+            const r = await fetch('/api/actions', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'scan_profiles_sizes', server: BROKER })
+            });
+            const d = await r.json();
+            const cmdId = d.commandId || d.command_id;
+            if (!cmdId) { el.innerText = d.error || 'Commande refusée'; btn.disabled = false; return; }
+
+            let tries = 0;
+            const timer = setInterval(async () => {
+                if (++tries > 45) {
+                    clearInterval(timer); btn.disabled = false;
+                    el.innerText = 'Délai dépassé : aucun résultat de l\'agent ' + BROKER + ' — vérifier qu\'il est en ligne.';
+                    return;
+                }
+                try {
+                    const s = await (await fetch(`/api/command-status/${cmdId}`)).json();
+                    if (s.status !== 'success' && s.status !== 'error') return;
+                    clearInterval(timer);
+                    btn.disabled = false;
+                    if (s.status === 'error') { el.innerText = s.result || 'Échec du scan'; return; }
+                    // Le heartbeat suivant porte les nouvelles tailles : on recharge.
+                    showToast('Scan terminé — actualisation des tailles', 'success');
+                    setTimeout(loadDiskInfo, 2000);
+                } catch (_) { /* transitoire */ }
+            }, 2000);
+        } catch (e) {
+            el.innerText = `Erreur réseau : ${e.message}`;
+            btn.disabled = false;
+        }
+    }
+
+
+    // --- Nettoyage des téléchargements -------------------------------------
+    // Action DESTRUCTIVE : la simulation est obligatoire avant le nettoyage réel
+    // (le bouton NETTOYER reste désactivé tant qu'aucune simulation n'a tourné),
+    // et le nombre d'éléments annoncé doit correspondre à celui de la simulation.
+    let _dlSimulated = null;
+
+    async function downloadsCleanup(dryRun) {
+        const days = parseInt(document.getElementById('dl-days').value, 10) || 14;
+        const btn = document.getElementById('dl-clean-btn');
+        const out = document.getElementById('dl-result');
+
+        if (!dryRun) {
+            if (!_dlSimulated) { showToast('Lancez d\'abord une simulation', 'error'); return; }
+            const msg = `Supprimer définitivement ${_dlSimulated.candidates} élément(s) `
+                      + `(${(_dlSimulated.total_mb/1024).toFixed(2)} Go) dans les dossiers Téléchargement `
+                      + `de ${_dlSimulated.profiles_scanned} profils ?\n\nCette action est IRRÉVERSIBLE.`;
+            if (!confirm(msg)) return;
+        }
+
+        out.style.display = 'block';
+        out.innerHTML = `<div class="text-subtle" style="font-size:0.85rem;">
+            <span class="material-symbols-rounded" style="font-size:16px; vertical-align:middle; animation:spin 1s linear infinite;">progress_activity</span>
+            ${dryRun ? 'Simulation' : 'Nettoyage'} en cours — le scan des 101 profils prend ~30 s…</div>`;
+
+        try {
+            const r = await fetch('/api/actions', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'clean_downloads', server: BROKER,
+                                       params: { days, dry_run: dryRun } })
+            });
+            const d = await r.json();
+            const cmdId = d.commandId || d.command_id;
+            if (!cmdId) { out.innerHTML = `<div class="text-error" style="font-size:0.85rem;">${d.error || 'Commande refusée'}</div>`; return; }
+            pollDownloadsCleanup(cmdId, dryRun);
+        } catch (e) {
+            out.innerHTML = `<div class="text-error" style="font-size:0.85rem;">Erreur réseau : ${e.message}</div>`;
+        }
+    }
+
+    function pollDownloadsCleanup(cmdId, dryRun) {
+        const out = document.getElementById('dl-result');
+        let tries = 0;
+        const timer = setInterval(async () => {
+            if (++tries > 45) { clearInterval(timer); out.innerHTML = '<div class="text-warning" style="font-size:0.85rem;">Délai dépassé : l\'agent ' + BROKER + ' n\'a pas renvoyé de résultat. Vérifier qu\'il est en ligne (page État du Parc) avant de chercher dans ses logs.</div>'; return; }
+            try {
+                const r = await fetch(`/api/command-status/${cmdId}`);
+                const d = await r.json();
+                if (d.status !== 'success' && d.status !== 'error') return;
+                clearInterval(timer);
+                if (d.status === 'error') { out.innerHTML = `<div class="text-error" style="font-size:0.85rem;">${d.result || 'Échec'}</div>`; return; }
+                let res;
+                try { res = JSON.parse(d.result); } catch { out.innerHTML = `<pre class="console-box">${d.result}</pre>`; return; }
+                renderDownloadsResult(res, dryRun);
+            } catch (_) { /* transitoire */ }
+        }, 2000);
+    }
+
+    /** Échappement local (même règle que sessions.html). */
+    function escH(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => (
+            { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+        ));
+    }
+    function fmtSz(mb) {
+        if (mb == null) return '—';
+        return mb >= 1024 ? (mb / 1024).toFixed(1).replace('.', ',') + ' Go' : Math.round(mb) + ' Mo';
+    }
+
+    /** Modal détail de la simulation : la liste des éléments qui SERAIENT
+     *  supprimés, groupée par profil (sous-totaux), filtrable. L'agent
+     *  plafonne à 300 éléments triés par taille et ANNONCE la troncature. */
+    /** Simulation du nettoyage Téléchargements pour UN profil.
+     *  L'agent accepte déjà `-Profile` : on lui passe le nom, on récupère la
+     *  liste des éléments et on ouvre le MÊME modal, scopé sur cet utilisateur.
+     *  dry_run: true — rien n'est supprimé, c'est une lecture. */
+    async function simulateProfileCleanup(name) {
+        const days = parseInt(document.getElementById('dl-days').value, 10) || 14;
+        showToast(`Simulation du nettoyage pour ${name} (seuil ${days} j)…`, 'info');
+        try {
+            const r = await fetch('/api/actions', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'clean_downloads', server: BROKER,
+                                       params: { days, dry_run: true, profile: name } })
+            });
+            const d = await r.json();
+            const cmdId = d.commandId || d.command_id;
+            if (!cmdId) { showToast(d.error || 'Commande refusée', 'error'); return; }
+
+            let tries = 0;
+            const timer = setInterval(async () => {
+                if (++tries > 45) { clearInterval(timer); showToast(`Délai dépassé pour ${name} — l'agent n'a pas répondu`, 'warning'); return; }
+                try {
+                    const s = await (await fetch(`/api/command-status/${cmdId}`)).json();
+                    if (s.status !== 'success' && s.status !== 'error') return;
+                    clearInterval(timer);
+                    if (s.status === 'error') { showToast(`Simulation impossible : ${s.result || 'erreur agent'}`, 'error'); return; }
+                    let res;
+                    try { res = JSON.parse(s.result); }
+                    catch { showToast('Réponse illisible de l\'agent', 'error'); return; }
+                    if (!res.candidates) { showToast(`Rien à supprimer pour ${name} avec un seuil de ${days} jours`, 'success'); return; }
+                    openCleanupDetail(res, name);
+                } catch (_) { /* transitoire */ }
+            }, 2000);
+        } catch (e) {
+            showToast(`Erreur réseau : ${e.message}`, 'error');
+        }
+    }
+
+    function openCleanupDetail(resArg, scopeLabel) {
+        const res = resArg || _dlSimulated;
+        if (!res) { showToast('Lancez d\'abord une simulation', 'warning'); return; }
+        // items (agents 2.25.3+) sinon top (15 max, agents plus anciens)
+        const items = res.items || res.top || [];
+        const truncated = res.items ? (res.items_truncated || 0) : Math.max(0, res.candidates - items.length);
+
+        const byProfile = {};
+        items.forEach(i => {
+            (byProfile[i.profile] = byProfile[i.profile] || []).push(i);
+        });
+        const groups = Object.entries(byProfile)
+            .map(([prof, list]) => ({ prof, list, total: list.reduce((a, i) => a + (i.size_mb || 0), 0) }))
+            .sort((a, b) => b.total - a.total);
+
+        const overlay = document.createElement('div');
+        overlay.id = 'cleanup-detail-modal';
+        overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:9999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);";
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        const groupHtml = groups.map(g => `
+            <div class="cleanup-group" data-profile="${escH(g.prof.toLowerCase())}" style="margin-bottom:14px;">
+                <div class="row justify-between" style="padding:6px 0; border-bottom:2px solid var(--slate-200);">
+                    <span class="font-black text-strong" style="font-size:0.82rem;">${escH(g.prof)}</span>
+                    <span class="font-bold text-subtle" style="font-size:0.78rem;">${g.list.length} élément(s) · ${fmtSz(g.total)}</span>
+                </div>
+                ${g.list.map(i => `
+                    <div class="cleanup-item row justify-between" data-name="${escH((i.name || '').toLowerCase())}" style="padding:5px 0 5px 12px; border-bottom:1px solid var(--slate-100); font-size:0.78rem;">
+                        <span class="text-strong" style="word-break:break-all;">${escH(i.name)}</span>
+                        <span class="row gap-3" style="white-space:nowrap;">
+                            <span class="text-muted">${i.age_days} j</span>
+                            <strong>${fmtSz(i.size_mb)}</strong>
+                        </span>
+                    </div>`).join('')}
+            </div>`).join('');
+
+        overlay.innerHTML = `
+            <div style="background:var(--card-bg, #fff); padding:26px 30px; border-radius:20px; max-width:640px; width:94%; max-height:86vh; display:flex; flex-direction:column; box-shadow:var(--shadow-lg, 0 20px 50px rgba(0,0,0,0.25)); border:1px solid var(--slate-200);">
+                <div class="row justify-between" style="margin-bottom:12px;">
+                    <div class="row gap-3">
+                        <span class="material-symbols-rounded text-accent" style="font-size:26px;">list_alt</span>
+                        <div>
+                            <h3 style="margin:0; font-size:1rem;">Éléments qui seraient supprimés${scopeLabel ? ' — ' + escH(scopeLabel) : ''}</h3>
+                            <span class="text-muted" style="font-size:0.72rem;">${res.candidates} élément(s) · ${(res.total_mb / 1024).toFixed(2)} Go · seuil ${res.days} j${scopeLabel ? '' : ` · ${res.profiles_scanned} profils`} — simulation, rien n'est supprimé</span>
+                        </div>
+                    </div>
+                    <button class="btn-action btn-sm" onclick="document.getElementById('cleanup-detail-modal').remove()"><span class="material-symbols-rounded" style="font-size:16px;">close</span></button>
+                </div>
+                <input type="text" class="form-control" placeholder="Filtrer par profil ou nom de fichier…" style="margin-bottom:12px;"
+                       oninput="filterCleanupDetail(this.value)">
+                <div id="cleanup-detail-list" style="overflow-y:auto; flex:1; padding-right:6px;">${groupHtml}</div>
+                ${truncated > 0 ? `<div class="text-warning" style="font-size:0.72rem; margin-top:10px;">⚠️ ${truncated} élément(s) non listé(s) (les ${items.length} plus gros sont affichés) — le nettoyage les supprimera aussi.</div>` : ''}
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+
+    function filterCleanupDetail(q) {
+        q = (q || '').toLowerCase().trim();
+        document.querySelectorAll('#cleanup-detail-list .cleanup-group').forEach(g => {
+            let visible = 0;
+            const profMatch = g.dataset.profile.includes(q);
+            g.querySelectorAll('.cleanup-item').forEach(it => {
+                const show = !q || profMatch || it.dataset.name.includes(q);
+                it.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+            g.style.display = visible ? '' : 'none';
+        });
+    }
+
+    function renderDownloadsResult(res, dryRun) {
+        const out = document.getElementById('dl-result');
+        const btn = document.getElementById('dl-clean-btn');
+        const go = (res.total_mb / 1024).toFixed(2);
+        const rows = (res.top || []).map(i =>
+            `<div class="user-row"><div class="row gap-3">
+                <span class="mono" style="font-size:0.78rem;">${i.profile}</span>
+                <span class="text-subtle" style="font-size:0.78rem;">${i.name}</span>
+             </div>
+             <div class="row gap-3"><span class="text-subtle" style="font-size:0.75rem;">${i.age_days} j</span>
+             <strong style="font-size:0.8rem;">${i.size_mb >= 1024 ? (i.size_mb/1024).toFixed(1)+' Go' : i.size_mb+' Mo'}</strong></div></div>`
+        ).join('');
+
+        if (dryRun) {
+            _dlSimulated = res;
+            btn.disabled = res.candidates === 0;
+            btn.title = res.candidates === 0 ? 'Rien à supprimer' : 'Supprimer les éléments listés';
+            out.innerHTML = `
+                <div class="text-strong font-bold" style="font-size:0.9rem; margin-bottom:8px;">
+                    Simulation — aucun fichier supprimé
+                </div>
+                <div class="text-subtle" style="font-size:0.82rem; margin-bottom:10px;">
+                    ${res.candidates} élément(s) éligible(s) · <strong>${go} Go</strong> récupérables ·
+                    ${res.folders_found} dossier(s) Téléchargement sur ${res.profiles_scanned} profils ·
+                    seuil ${res.days} jours
+                </div>
+                ${res.candidates > 0 ? `<button class="btn-action btn-sm" style="margin-bottom:10px;" onclick="openCleanupDetail()">
+                    <span class="material-symbols-rounded" style="font-size:15px; vertical-align:middle;">list_alt</span>
+                    VOIR LE DÉTAIL (${(res.items || res.top || []).length} listé(s))
+                </button>` : ''}
+                ${rows || '<div class="text-subtle" style="font-size:0.82rem;">Rien à supprimer avec ce seuil.</div>'}`;
+        } else {
+            _dlSimulated = null;
+            btn.disabled = true;
+            btn.title = "Relancez une simulation";
+            const freed = (res.freed_mb / 1024).toFixed(2);
+            out.innerHTML = `
+                <div class="text-strong font-bold" style="font-size:0.9rem; margin-bottom:8px;">
+                    Nettoyage terminé — ${res.deleted} élément(s) supprimé(s), <strong>${freed} Go</strong> libérés
+                </div>
+                ${res.failed ? `<div class="text-warning" style="font-size:0.82rem;">${res.failed} échec(s) de suppression (fichier verrouillé ou droits) — vérifié après coup, pas supposé.</div>` : ''}
+                <div id="dl-refresh-note" class="text-subtle" style="font-size:0.8rem; margin-top:6px;"></div>`;
+            // Surtout PAS loadDiskInfo() ici : le heartbeat courant est anterieur
+            // aux suppressions et reafficherait les chiffres d'avant.
+            refreshAfterCleanup(Date.now());
+        }
+    }
+
+    /** Rendu unique de la page a partir d'un payload /api/profiles-disk-info.
+     *  Factorise : les trois chemins (chargement, rafraichissement force,
+     *  apres-nettoyage) doivent peindre exactement la meme chose. */
+    function applyProfilesData(data) {
+        updateDiskStats(data.disk);
+        allProfiles = data.profiles || [];
+        document.getElementById('profiles-count-title').innerText = `Profils Utilisateurs (${data.total_profiles || 0})`;
+        document.getElementById('profiles-location').innerText = profilesLocationLabel(data);
+        renderAgentState(data);
+        renderSizesFreshness(data);
+        renderProfilesTable(allProfiles);
+    }
+
+    async function loadDiskInfo() {
+        try {
+            const res = await fetch('/api/profiles-disk-info');
+            if (!res.ok) throw new Error('Erreur réseau');
+            const data = await res.json();
+            if (data.status === 'success') {
+                applyProfilesData(data);
+            } else {
+                showToast('Erreur chargement disque: ' + (data.message || 'Inconnue'), 'error');
+            }
+        } catch (e) {
+            showToast('Impossible de charger les données R:. Assurez-vous que le service est actif.', 'error');
+            console.error(e);
+        }
+    }
+
+    /** Rafraîchissement APRÈS un nettoyage réel.
+     *
+     *  🔴 Les 4 chiffres d'en-tête (Total/Utilisé/Libre/%) ne sont pas mesurés à
+     *  l'affichage : ils viennent du champ `disks` du DERNIER heartbeat de
+     *  broker conservé par le master. Recharger immédiatement — ce que faisait
+     *  renderDownloadsResult — affiche donc l'état d'AVANT les suppressions, et
+     *  plus rien ne le corrige ensuite. Cadence ~10 s, et jusqu'à 20 s quand
+     *  l'agent digère une file (2.26.0). Signalé en conditions réelles le 28/08/2026.
+     *
+     *  On attend donc un heartbeat POSTÉRIEUR à la fin du nettoyage. La comparaison
+     *  n'utilise que l'horloge du navigateur (temps écoulé depuis `doneAt`) et l'âge
+     *  fourni par le serveur : jamais deux horloges différentes, qui dériveraient
+     *  l'une par rapport à l'autre.
+     *
+     *  Si aucun heartbeat frais n'arrive, on le DIT au lieu de laisser croire que
+     *  les chiffres affichés sont à jour (piège 17 : une valeur sans sa fraîcheur
+     *  ment par omission). */
+    async function refreshAfterCleanup(doneAt) {
+        const note = () => document.getElementById('dl-refresh-note');
+        const deadline = Date.now() + 60000;
+        if (note()) note().innerText = 'Actualisation des compteurs — attente du prochain heartbeat de ' + BROKER + '…';
+        while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 3000));
+            try {
+                const res = await fetch('/api/profiles-disk-info');
+                if (!res.ok) continue;
+                const data = await res.json();
+                if (data.status !== 'success') continue;
+                const age = data.agent_age_seconds;
+                if (age != null && age * 1000 < (Date.now() - doneAt)) {
+                    applyProfilesData(data);
+                    if (note()) note().innerText = '';
+                    return true;
+                }
+            } catch (_) { /* transitoire */ }
+        }
+        if (note()) {
+            note().innerText = "Compteurs NON rafraîchis : aucun heartbeat de " + BROKER + " depuis le nettoyage. "
+                             + "Les chiffres ci-dessus datent d'avant. Rechargez la page dans une minute.";
+        }
+        return false;
+    }
+
+    async function refreshDiskInfo() {
+        // Force le recalcul en invalidant le cache
+        try {
+            const res = await fetch('/api/profiles-disk-info-refresh', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            });
+            if (!res.ok) throw new Error('Erreur réseau');
+            const data = await res.json();
+            if (data.status === 'success') {
+                applyProfilesData(data);
+                showToast(`Mise à jour complète: ${data.total_profiles} profils`, 'success');
+            } else {
+                showToast('Erreur mise à jour: ' + (data.message || 'Inconnue'), 'error');
+            }
+        } catch (e) {
+            showToast('Erreur lors de la mise à jour.', 'error');
+            console.error(e);
+        }
+    }
+
+    function updateDiskStats(disk) {
+        if (!disk) return;
+        // Mise à jour des data points header
+        document.getElementById('stat-total-gb').innerText = (disk.total_gb || 0).toFixed(1) + ' GB';
+        document.getElementById('stat-used-gb').innerText = (disk.used_gb || 0).toFixed(1) + ' GB';
+        document.getElementById('stat-free-gb').innerText = (disk.free_gb || 0).toFixed(1) + ' GB';
+        document.getElementById('stat-percent-used').innerText = (disk.percent_used || 0).toFixed(1) + '%';
+        
+        // Barre visuelle
+        const bar = document.getElementById('disk-usage-bar');
+        const percent = disk.percent_used || 0;
+        bar.style.width = percent + '%';
+        
+        // Couleur dynamique de la barre
+        if (percent >= 90) {
+            bar.style.background = 'linear-gradient(90deg, var(--error) 0%, var(--error-dark) 100%)';
+        } else if (percent >= 75) {
+            bar.style.background = 'linear-gradient(90deg, var(--warning) 0%, var(--warning-dark) 100%)';
+        } else {
+            bar.style.background = 'linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-secondary) 100%)';
+        }
+    }
+
+    function renderProfilesTable(profiles) {
+        const body = document.getElementById('profiles-body');
+        body.innerHTML = '';
+        
+        if (!profiles || profiles.length === 0) {
+            body.innerHTML = '<tr><td colspan="5" class="text-center text-muted" style="padding:40px;">Aucun profil trouvé</td></tr>';
+            return;
+        }
+
+        // Tri par taille décroissante (par défaut) — le tri interactif (table-utils.js)
+        // prend le relais au clic sur un en-tête.
+        profiles.sort((a, b) => b.size_mb - a.size_mb);
+        // (le verrouillage des boutons est ré-appliqué en fin de rendu)
+
+        // Le tbody est reconstruit : les boutons neufs doivent hériter de l'état
+        // de l'agent, sinon un rafraîchissement les rend cliquables alors que
+        // l'agent est hors-ligne.
+        const applyLock = () => setRowActionsEnabled(_brokerOnline);
+        profiles.forEach((profile, idx) => {
+            // Robustesse port Linux : size_mb/percent_disk peuvent être 0 ou absents
+            // (profil non scanné -> "Scan requis"). On coerce en Number pour éviter
+            // un throw sur .toFixed() qui casserait tout le rendu du tableau.
+            const pd = Number(profile.percent_disk) || 0;
+            const smb = Number(profile.size_mb) || 0;
+            const sizeClass = pd >= 2 ? 'text-error' : pd >= 1 ? 'text-warning' : 'text-success';
+            const sizeText = profile.size_label
+                ? profile.size_label
+                : (smb > 1024 ? (smb / 1024).toFixed(1) + ' GB' : smb.toFixed(1) + ' MB');
+
+            body.innerHTML += `<tr data-profile="${profile.name}">
+                <td class="text-center" style="width:40px;">
+                    <input type="checkbox" class="profile-checkbox" value="${profile.name}" onchange="updateBulkSelection()" title="Sélectionner ${profile.name}">
+                </td>
+                <td style="width:35%;">
+                    <div class="font-bold text-strong" style="word-break:break-word;">${profile.name}</div>
+                    <div class="text-muted" style="font-size:0.75rem;">Modifié: ${profile.last_modified || 'N/A'}</div>
+                </td>
+                <td class="text-right" style="width:20%;" data-sort-value="${smb}">
+                    <span class="badge mono font-semibold" style="background:var(--slate-100); color:var(--slate-600);">
+                        ${sizeText}
+                    </span>
+                </td>
+                <td class="text-center" style="width:20%;">
+                    <div class="row justify-center gap-2">
+                        <div style="width:60px; height:4px; background:var(--slate-200); border-radius:2px; overflow:hidden;">
+                            <div class="${sizeClass}" style="height:100%; width:${Math.min(pd * 20, 100)}%; background:currentColor; border-radius:2px;"></div>
+                        </div>
+                        <span class="text-subtle font-semibold" style="font-size:0.85rem; min-width:35px;">${pd.toFixed(2)}%</span>
+                    </div>
+                </td>
+                <td class="text-right" style="width:25%;">
+                    <div class="row justify-end gap-2">
+                        <button class="btn-action" onclick="analyzeProfile('${profile.name}')" data-title="Analyser répartition" title="Analyser répartition" aria-label="Analyser profil ${profile.name}">
+                            <span class="material-symbols-rounded" style="font-size:18px;">analytics</span>
+                        </button>
+                        <button class="btn-action" onclick="simulateProfileCleanup('${profile.name}')" data-title="Voir ce qui serait supprimé (Téléchargements)" title="Voir ce qui serait supprimé (Téléchargements)" aria-label="Simuler le nettoyage du profil ${profile.name}">
+                            <span class="material-symbols-rounded" style="font-size:18px;">rule</span>
+                        </button>
+                        <button class="btn-action" onclick="profileAction('clean', '${profile.name}')" data-title="Nettoyer AppData" title="Nettoyer AppData" aria-label="Nettoyer profil ${profile.name}">
+                            <span class="material-symbols-rounded" style="font-size:18px;">delete_outline</span>
+                        </button>
+                    </div>
+                </td>
+            </tr>`;
+        });
+
+        applyLock();   // les boutons neufs héritent de l'état de l'agent
+        // Afficher la barre d'actions bulk si > 0 profils
+        updateBulkActionBar();
+    }
+
+    function toggleSelectAll() {
+        const checkbox = document.getElementById('select-all-checkbox');
+        const allCheckboxes = document.querySelectorAll('.profile-checkbox');
+        
+        allCheckboxes.forEach(cb => {
+            cb.checked = checkbox.checked;
+        });
+        
+        updateBulkSelection();
+    }
+
+    function selectAllProfiles() {
+        document.querySelectorAll('.profile-checkbox').forEach(cb => {
+            cb.checked = true;
+        });
+        updateBulkSelection();
+    }
+
+    function deselectAllProfiles() {
+        document.querySelectorAll('.profile-checkbox').forEach(cb => {
+            cb.checked = false;
+        });
+        updateBulkSelection();
+    }
+
+    function updateBulkSelection() {
+        selectedProfiles.clear();
+        document.querySelectorAll('.profile-checkbox:checked').forEach(cb => {
+            selectedProfiles.add(cb.value);
+        });
+        updateBulkActionBar();
+    }
+
+    function updateBulkActionBar() {
+        const bar = document.getElementById('bulk-actions-bar');
+        const count = selectedProfiles.size;
+        
+        if (count > 0) {
+            bar.style.display = 'flex';
+            document.getElementById('bulk-selection-count').innerText = `${count} profil(s) sélectionné(s)`;
+        } else {
+            bar.style.display = 'none';
+        }
+    }
+
+    async function analyzeProfile(name) {
+        showToast(`Analyse en cours pour ${name}...`, 'info');
+        try {
+            const res = await fetch('/api/profile-action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'analyze', name: name, server: 'LOCAL'})
+            });
+            const result = await res.json();
+            
+            if (result.status === 'success' && result.analysis) {
+                showAnalysisModal(name, result.analysis);
+            } else if (result.command_id) {
+                pollCommandStatus(result.command_id, 'analyze', name);
+            } else {
+                showToast('Erreur analyse: ' + (result.message || 'Inconnue'), 'error');
+            }
+        } catch (e) {
+            showToast('Erreur communication serveur', 'error');
+        }
+    }
+
+    async function profileAction(action, name) {
+        // Garde-fou destructif (règle projet) : le nettoyage supprime des fichiers
+        // (Temp/Cache) sur le broker -> confirmation explicite avant exécution.
+        if ((action === 'clean' || action === 'cleanup')
+            && !confirm(`Nettoyer les fichiers temporaires du profil « ${name} » sur le broker ?\n\nCette action supprime le contenu de AppData\\Local\\Temp.`)) {
+            return;
+        }
+        try {
+            const res = await fetch('/api/profile-action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action, name, server: 'LOCAL'})
+            });
+            const result = await res.json();
+            
+            if (result.status === 'success') {
+                if (result.command_id) {
+                    pollCommandStatus(result.command_id, action, name);
+                } else {
+                    showToast(result.message, 'success');
+                }
+            } else {
+                showToast('Erreur: ' + (result.message || 'Échec'), 'error');
+            }
+        } catch (e) {
+            showToast('Erreur communication', 'error');
+        }
+    }
+
+    async function confirmBulkClean() {
+        const profiles = Array.from(selectedProfiles);
+        const msg = `Êtes-vous sûr de vouloir nettoyer ${profiles.length} profil(s) ?\n\nCette action supprimera les fichiers temporaires (Temp, Cache).`;
+        
+        if (confirm(msg)) {
+            for (const profileName of profiles) {
+                await profileAction('clean', profileName);
+            }
+            deselectAllProfiles();
+            setTimeout(() => loadDiskInfo(), 2000);
+        }
+    }
+
+    async function pollCommandStatus(cmdId, action, name) {
+        let attempts = 0;
+        const interval = setInterval(async () => {
+            attempts++;
+            if (attempts > 30) {
+                clearInterval(interval);
+                showToast("Délai dépassé pour l'opération", "warning");
+                return;
+            }
+            
+            try {
+                const res = await fetch(`/api/command-status/${cmdId}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    clearInterval(interval);
+                    
+                    if (action === 'analyze') {
+                        let analysis;
+                        try {
+                            analysis = JSON.parse(data.result);
+                        } catch (e) {
+                            showToast('Erreur parsing: ' + e, 'error');
+                            return;
+                        }
+                        // Le rendu est hors du try parsing : une erreur d'affichage
+                        // (ex. modale absente du DOM après navigation) ne doit pas
+                        // être étiquetée « Erreur parsing ».
+                        showAnalysisModal(name, analysis);
+                    } else {
+                        showToast(`${name}: ${data.result}`, 'success');
+                        setTimeout(() => loadDiskInfo(), 1500);
+                    }
+                } else if (data.status === 'error') {
+                    clearInterval(interval);
+                    showToast(`Erreur: ${data.result}`, 'error');
+                }
+            } catch (e) {
+                // Ignore transient errors
+            }
+        }, 2000);
+    }
+
+    function showAnalysisModal(profileName, analysis) {
+        // Garde défensive : si la modale n'est plus dans le DOM (navigation,
+        // fermeture pendant le poll), on n'écrit nulle part plutôt que de crasher.
+        const modal = document.getElementById('analysis-modal');
+        const content = document.getElementById('modal-content');
+        if (!modal || !content) return;
+        const total = analysis.total_mb || 1;
+        let html = `
+        <p><strong>${profileName}</strong> - Total: <strong>${analysis.total_mb.toFixed(1)} MB</strong></p>
+
+        <table style="width:100%; border-collapse:collapse;">
+            <thead>
+                <tr style="border-bottom:2px solid var(--slate-200);">
+                    <th class="text-left text-subtle font-semibold" style="padding:12px 0;">DOSSIER</th>
+                    <th class="text-right text-subtle font-semibold" style="padding:12px 0;">TAILLE</th>
+                    <th class="text-right text-subtle font-semibold" style="padding:12px 0;">%</th>
+                </tr>
+            </thead>
+            <tbody>
+        `;
+
+        (analysis.folders || []).forEach(folder => {
+            const percent = ((folder.size_mb / total) * 100).toFixed(1);
+            const barClass = folder.size_mb > total * 0.5 ? 'text-error' : folder.size_mb > total * 0.2 ? 'text-warning' : 'text-success';
+
+            html += `
+                <tr style="border-bottom:1px solid var(--slate-100);">
+                    <td class="font-semibold text-strong" style="padding:12px 0;">${folder.name}</td>
+                    <td class="text-right mono font-semibold text-subtle" style="padding:12px 0;">
+                        ${folder.size_mb > 1024 ? (folder.size_mb / 1024).toFixed(1) + ' GB' : folder.size_mb.toFixed(1) + ' MB'}
+                    </td>
+                    <td class="text-right" style="padding:12px 0;">
+                        <div class="row justify-end gap-2">
+                            <div style="width:80px; height:4px; background:var(--slate-200); border-radius:2px; overflow:hidden;">
+                                <div class="${barClass}" style="height:100%; width:${percent}%; background:currentColor; border-radius:2px;"></div>
+                            </div>
+                            <span class="text-subtle font-semibold" style="font-size:0.85rem; min-width:45px;">${percent}%</span>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+        
+        html += `</tbody></table>`;
+        
+        const titleEl = document.getElementById('modal-title');
+        const infoEl = document.getElementById('modal-info');
+        if (titleEl) titleEl.innerText = `Analyse Détaillée - ${profileName}`;
+        if (infoEl) infoEl.innerText = `Total: ${analysis.total_mb.toFixed(1)} MB`;
+        content.innerHTML = html;
+        modal.style.display = 'flex';
+    }
+
+    function closeAnalysisModal() {
+        document.getElementById('analysis-modal').style.display = 'none';
+    }
+
+</script>
+{% endblock %}

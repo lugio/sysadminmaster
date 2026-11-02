@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header, stat_card %}
+
+{% block title %}Alertes & Envois{% endblock %}
+{% block page_title %}Alertes & Envois — contrôle quotidien des jetons Office{% endblock %}
+
+{% block content %}
+<div class="content-section fade-in">
+
+    <!-- ÉTAT DE LA TÂCHE -->
+    <div class="stat-strip" style="margin-bottom:24px;">
+        {{ stat_card('schedule', 'Prochain contrôle', '—', 'bg-primary-soft', 'stat-next') }}
+        {{ stat_card('mark_email_read', 'Envois (30 j)', '—', 'bg-success-soft', 'stat-sent') }}
+        {{ stat_card('inbox', 'Contrôles sans envoi', '—', 'bg-primary-soft', 'stat-silent') }}
+        {{ stat_card('report', 'Échecs de livraison', '—', 'bg-error-soft', 'stat-failed') }}
+    </div>
+
+    <!-- NOTE D'INFORMATION -->
+    <div class="card" style="margin-bottom:20px; padding:14px 18px;">
+        <div class="text-subtle" style="font-size:0.8rem;">
+            <strong>À quoi sert cette page :</strong> distinguer « rien à signaler » d'une tâche cassée.
+            Un contrôle a lieu chaque jour ; il n'envoie un mail que s'il trouve un
+            <strong>jeton périmé</strong> (&gt; 30 jours) ou une <strong>SCA désactivée</strong>.
+            <strong>Ne rien recevoir est donc le cas normal</strong> quand la ferme est saine — et
+            c'était indistinguable d'une panne avant cette page.
+            Chaque passage est tracé ci-dessous, <strong>y compris ceux qui n'envoient rien</strong>.
+            <br><br>
+            ⚠️ <strong>« Envoyé » ne veut pas dire « lu ».</strong> La colonne <em>Livraison</em> donne le sort
+            réel du message chez Mailjet : <code>sent</code> = accepté par le serveur du destinataire,
+            <code>blocked</code>/<code>hardbounced</code> = jamais délivré. Entre le 31/07 et le 24/08/2026,
+            les alertes partaient vers une adresse inexistante pendant que le journal affichait
+            « mail envoyé » chaque jour. Ces mails étant en <strong>texte seul</strong>, ils ne portent
+            aucun pixel de suivi : le statut <code>opened</code> ne peut jamais apparaître, et son
+            absence ne prouve donc <strong>pas</strong> que personne ne les lit.
+        </div>
+    </div>
+
+    <!-- CONFIGURATION -->
+    <div class="card" style="margin-bottom:20px;">
+        {{ card_header('tune', 'Configuration de la tâche') }}
+        <div id="alert-config" class="text-subtle" style="font-size:0.85rem;">Chargement…</div>
+        <div class="row gap-3" style="margin-top:14px; flex-wrap:wrap;">
+            <button class="btn-action btn-sm" id="btn-refresh-delivery" onclick="refreshDelivery()">
+                <span class="material-symbols-rounded" style="font-size:15px; vertical-align:middle;">fact_check</span>
+                VÉRIFIER LES LIVRAISONS
+            </button>
+            <button class="btn-premium btn-sm" id="btn-test" onclick="sendTest()">
+                <span class="material-symbols-rounded" style="font-size:15px; vertical-align:middle;">outgoing_mail</span>
+                ENVOYER UN CONTRÔLE DE TEST
+            </button>
+        </div>
+        <div id="action-result" class="text-subtle" style="font-size:0.82rem; margin-top:10px;"></div>
+    </div>
+
+    <!-- HISTORIQUE -->
+    <div class="card">
+        <div class="row justify-between" style="align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+            {{ card_header('history', 'Historique des contrôles') }}
+            <input type="text" class="form-control" data-filter-for="alerts-table"
+                   placeholder="Filtrer…" style="max-width:260px;" autocomplete="off">
+        </div>
+        <div style="overflow-x:auto;">
+            <table id="alerts-table" data-enhance>
+                <thead>
+                    <tr>
+                        <th data-sort="text">Date du contrôle</th>
+                        <th data-sort="text">Origine</th>
+                        <th data-sort="num" class="text-center">Jetons périmés</th>
+                        <th data-sort="num" class="text-center">SCA off</th>
+                        <th data-sort="text">Issue</th>
+                        <th data-sort="text">Livraison</th>
+                        <th data-no-sort></th>
+                    </tr>
+                </thead>
+                <tbody id="alerts-body"></tbody>
+            </table>
+        </div>
+        <div id="alerts-empty" class="text-subtle" style="font-size:0.85rem; display:none; padding:14px 0;"></div>
+    </div>
+</div>
+
+<!-- MODAL : contenu du digest tel qu'envoyé -->
+<div id="digest-modal" data-static-modal style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div class="card" style="max-width:760px; width:92%; max-height:82vh; display:flex; flex-direction:column;">
+        <div class="row justify-between" style="align-items:center; margin-bottom:8px;">
+            <h3 id="digest-title" style="margin:0;">Message envoyé</h3>
+            <button class="btn-action btn-sm" onclick="closeDigest()">
+                <span class="material-symbols-rounded" style="font-size:16px;">close</span>
+            </button>
+        </div>
+        <p id="digest-meta" class="text-subtle" style="font-size:0.8rem; margin:0 0 12px 0;"></p>
+        <div id="digest-body" class="console-box" style="flex:1; overflow:auto; white-space:pre-wrap;"></div>
+    </div>
+</div>
+
+<script>
+    let allRuns = [];
+
+    function escH(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => (
+            { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+        ));
+    }
+
+    function fmtDate(iso) {
+        if (!iso) return '—';
+        return String(iso).replace('T', ' ').slice(0, 16);
+    }
+
+    /** Statut Mailjet → badge. `queued` n'est PAS un succès : le message est
+     *  accepté par l'API mais son sort n'est pas encore connu. Le présenter en
+     *  vert ferait exactement l'erreur qui a masqué 24 jours de hard bounces. */
+    function deliveryBadge(run) {
+        if (!run.sent) return '<span class="text-subtle">—</span>';
+        const st = run.mailjet_status || 'inconnu';
+        const map = {
+            sent:        ['badge-success', 'délivré'],
+            opened:      ['badge-success', 'ouvert'],
+            clicked:     ['badge-success', 'cliqué'],
+            queued:      ['badge-warning', 'en attente'],
+            blocked:     ['badge-error',   'bloqué'],
+            hardbounced: ['badge-error',   'adresse invalide'],
+            softbounced: ['badge-error',   'rejet temporaire'],
+            spam:        ['badge-error',   'signalé spam'],
+        };
+        const [cls, label] = map[st] || ['badge-warning', st];
+        // Un statut sans sa date de vérification ne dit pas s'il est frais.
+        const when = run.mailjet_checked_at
+            ? `<div class="text-subtle" style="font-size:0.72rem; margin-top:3px;">vérifié le ${escH(fmtDate(run.mailjet_checked_at))}</div>`
+            : '<div class="text-subtle" style="font-size:0.72rem; margin-top:3px;">jamais vérifié</div>';
+        return `<span class="badge ${cls}">${escH(label)}</span>${when}`;
+    }
+
+    function issueCell(run) {
+        if (run.error) {
+            return `<span class="badge badge-error">échec d'envoi</span>
+                    <div class="text-subtle" style="font-size:0.75rem; margin-top:3px;">${escH(run.error).slice(0,120)}</div>`;
+        }
+        if (run.sent) {
+            return `<span class="badge badge-success">mail envoyé</span>
+                    <div class="text-subtle" style="font-size:0.75rem; margin-top:3px;">${escH(run.subject || '')}</div>`;
+        }
+        return `<span class="badge">aucun envoi</span>
+                <div class="text-subtle" style="font-size:0.75rem; margin-top:3px;">${escH(run.reason || '')}</div>`;
+    }
+
+    function renderRuns(runs) {
+        const body = document.getElementById('alerts-body');
+        const empty = document.getElementById('alerts-empty');
+        body.innerHTML = '';
+        if (!runs.length) {
+            empty.style.display = 'block';
+            empty.innerText = "Aucun contrôle enregistré pour l'instant. "
+                + "L'historique démarre à la version 2.27.0 : les passages antérieurs "
+                + "n'existent que dans le journal du service.";
+            return;
+        }
+        empty.style.display = 'none';
+        runs.forEach((r, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td data-sort-value="${escH(r.checked_at || '')}">${escH(fmtDate(r.checked_at))}</td>
+                <td>${r.origin === 'manual' ? 'test manuel' : 'quotidien'}</td>
+                <td class="text-center">${r.stale_count ?? 0}</td>
+                <td class="text-center">${r.sca_off_count ?? 0}</td>
+                <td>${issueCell(r)}</td>
+                <td>${deliveryBadge(r)}</td>
+                <td class="text-center">${r.body ? `<button class="btn-action btn-sm" onclick="showDigest(${i})" title="Voir le message"><span class="material-symbols-rounded" style="font-size:15px;">mail</span></button>` : ''}</td>`;
+            body.appendChild(tr);
+        });
+    }
+
+    function renderStats(runs) {
+        const cut = Date.now() - 30 * 86400000;
+        const recent = runs.filter(r => new Date(r.checked_at).getTime() >= cut);
+        const sent = recent.filter(r => r.sent).length;
+        const silent = recent.filter(r => !r.sent && !r.error).length;
+        const failed = recent.filter(r =>
+            r.error || ['blocked', 'hardbounced', 'softbounced', 'spam'].includes(r.mailjet_status)).length;
+        document.getElementById('stat-sent').innerText = sent;
+        document.getElementById('stat-silent').innerText = silent;
+        document.getElementById('stat-failed').innerText = failed;
+    }
+
+    function renderConfig(a) {
+        const el = document.getElementById('alert-config');
+        if (!a || !Object.keys(a).length) {
+            el.innerHTML = '<span class="text-error">État indisponible — le master ne répond pas.</span>';
+            return;
+        }
+        document.getElementById('stat-next').innerText = fmtDate(a.next_check);
+        const dest = (a.recipients || []).length
+            ? (a.recipients || []).map(escH).join(', ')
+            : '<span class="text-error">aucun destinataire — la tâche est désactivée</span>';
+        el.innerHTML = `
+            <div class="stack gap-1">
+                <div><strong>État :</strong> ${a.armed
+                    ? '<span class="badge badge-success">armée</span>'
+                    : '<span class="badge badge-error">désactivée</span>'}
+                    — contrôle quotidien à ${escH(String(a.alert_hour).padStart(2, '0'))}h00</div>
+                <div><strong>Destinataires :</strong> ${dest}</div>
+                <div><strong>Expéditeur :</strong> ${escH(a.sender || '—')}</div>
+                <div><strong>Mailjet :</strong> ${a.mailjet_configured
+                    ? 'clés présentes'
+                    : '<span class="text-error">clés absentes — aucun envoi possible</span>'}</div>
+                <div class="text-subtle"><strong>Contrôle déjà passé aujourd'hui :</strong> ${a.already_checked_today ? 'oui' : 'pas encore'}
+                    · historique conservé ${a.retention_days} jours</div>
+            </div>`;
+    }
+
+    function showDigest(i) {
+        const r = allRuns[i];
+        if (!r) return;
+        document.getElementById('digest-title').innerText = r.subject || 'Message';
+        document.getElementById('digest-meta').innerText =
+            `${fmtDate(r.checked_at)} — destinataires : ${r.recipients || '—'}`;
+        document.getElementById('digest-body').innerText = r.body || '';
+        const m = document.getElementById('digest-modal');
+        m.style.display = 'flex';
+    }
+    function closeDigest() { document.getElementById('digest-modal').style.display = 'none'; }
+
+    async function load() {
+        try {
+            const [s, h] = await Promise.all([
+                fetch('/api/alerts/status').then(r => r.json()),
+                fetch('/api/alerts/history?limit=120').then(r => r.json()),
+            ]);
+            renderConfig(s.alerts);
+            allRuns = h.runs || [];
+            renderRuns(allRuns);
+            renderStats(allRuns);
+        } catch (e) {
+            document.getElementById('alert-config').innerHTML =
+                `<span class="text-error">Erreur de chargement : ${escH(e.message)}</span>`;
+        }
+    }
+
+    async function refreshDelivery() {
+        const btn = document.getElementById('btn-refresh-delivery');
+        const out = document.getElementById('action-result');
+        btn.disabled = true;
+        out.innerText = 'Interrogation de Mailjet sur le sort réel des messages…';
+        try {
+            const d = await (await fetch('/api/alerts/refresh-delivery', { method: 'POST' })).json();
+            // `checked` et `updated` disent deux choses différentes : combien de
+            // messages ont été RÉINTERROGÉS, et combien ont changé d'état. Sans la
+            // distinction, « 0 mis à jour » se lit « la vérification n'a rien fait ».
+            if (!d.checked) {
+                out.innerText = "Aucun message à vérifier (ou Mailjet injoignable).";
+            } else if (d.updated) {
+                out.innerText = `${d.checked} message(s) vérifié(s), ${d.updated} changement(s) de statut.`;
+            } else {
+                out.innerText = `${d.checked} message(s) vérifié(s) — aucun changement `
+                    + `(Mailjet met quelques minutes à sortir un message de « en attente »).`;
+            }
+            await load();
+        } catch (e) {
+            out.innerHTML = `<span class="text-error">Erreur : ${escH(e.message)}</span>`;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function sendTest() {
+        const out = document.getElementById('action-result');
+        if (!confirm("Envoyer un contrôle de test MAINTENANT aux destinataires configurés ?\n\nUn vrai mail sera expédié.")) return;
+        const btn = document.getElementById('btn-test');
+        btn.disabled = true;
+        out.innerText = 'Envoi en cours…';
+        try {
+            const r = await fetch('/api/alerts/test', { method: 'POST' });
+            const d = await r.json();
+            if (d.status !== 'success') {
+                out.innerHTML = `<span class="text-error">Échec : ${escH(d.message || 'erreur inconnue')}</span>`;
+            } else {
+                out.innerText = "Contrôle envoyé. Le statut de livraison reste « en attente » "
+                    + "quelques minutes : utilisez VÉRIFIER LES LIVRAISONS pour connaître son sort réel.";
+            }
+            await load();
+        } catch (e) {
+            out.innerHTML = `<span class="text-error">Erreur réseau : ${escH(e.message)}</span>`;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', load);
+</script>
+{% endblock %}

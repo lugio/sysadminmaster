@@ -1,0 +1,13 @@
+{
+  "name": "sysadminmaster-e2e",
+  "version": "2.32.0",
+  "private": true,
+  "description": "Harnais QA end-to-end de SysAdminMaster (Playwright). Le projet applicatif est en Python/PowerShell — ce package.json ne sert qu'aux tests.",
+  "scripts": {
+    "test": "./e2e/run-tests.sh --gate",
+    "test:all": "./e2e/run-tests.sh --all"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

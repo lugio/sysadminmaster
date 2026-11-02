@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header %}
+
+{% block title %}Ressources Système{% endblock %}
+{% block page_title %}Ressources Système & Inventaire{% endblock %}
+
+{% block content %}
+<div id="section-resources" class="content-section fade-in">
+    <div class="metrics-container">
+        <div id="sysinfo-content-card" class="card">
+            {{ card_header('info', 'Informations Système', 'text-accent') }}
+            <div id="sysinfo-content">
+                <div class="row gap-3 text-subtle font-semibold">
+                    <span class="loader"></span> Interrogation du système...
+                </div>
+            </div>
+        </div>
+        <div id="services-card" class="card">
+            {{ card_header('settings_suggest', 'Services Critiques RDS', 'text-accent') }}
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>SERVICE</th>
+                            <th class="text-center">STATUT</th>
+                        </tr>
+                    </thead>
+                    <tbody id="services-body">
+                        <tr>
+                            <td colspan="2" class="text-center text-muted" style="padding:40px;">
+                                <div class="stack gap-4" style="align-items:center;">
+                                    <span class="loader"></span>
+                                    <span>Collecte de l'état des services...</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function updateResources() {
+        try {
+            const server = document.getElementById('global-server-filter').value;
+            const res = await fetch(`/api/sysinfo?server=${server}`);
+            const info = await res.json();
+            
+            const isAll = server === 'All';
+            const infoCardTitle = document.querySelector('#sysinfo-content-card h3');
+            if (infoCardTitle) {
+                infoCardTitle.innerHTML = isAll ?
+                    '<span class="material-symbols-rounded text-accent">analytics</span> Synthèse du Parc' :
+                    '<span class="material-symbols-rounded text-accent">info</span> Informations Système';
+            }
+
+            document.getElementById('sysinfo-content').innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                    <div><span class="stat-card-label">${isAll ? 'CIBLE' : 'MACHINE'}</span><br><strong class="stat-card-value" style="font-size: 1rem;">${info.ComputerName}</strong></div>
+                    <div><span class="stat-card-label">SYSTÈME D'EXPLOITATION</span><br><strong class="stat-card-value" style="font-size: 1rem;">${info.OS}</strong></div>
+                    <div><span class="stat-card-label">${isAll ? 'CAPACITÉ' : 'VERSION DU NOYAU'}</span><br><strong class="stat-card-value" style="font-size: 1rem;">${info.Version}</strong></div>
+                    <div><span class="stat-card-label">${isAll ? 'ÉTAT DU PARC' : 'DERNIER DÉMARRAGE'}</span><br>
+                        <strong class="stat-card-value" style="font-size: 1rem;">${info.LastBoot}</strong>
+                        ${!isAll && info.Uptime ? `<div class="text-muted" style="font-size:0.75rem; margin-top:2px;">allumé depuis ${info.Uptime}</div>` : ''}
+                    </div>
+                </div>
+            `;
+
+            const sres = await fetch(`/api/services?server=${server}`);
+            const services = await sres.json();
+
+            const servicesCardTitle = document.querySelector('#services-card h3');
+            if (servicesCardTitle) {
+                servicesCardTitle.innerHTML = isAll ?
+                    '<span class="material-symbols-rounded text-accent">fact_check</span> Audit des Services RDS' :
+                    '<span class="material-symbols-rounded text-accent">settings_suggest</span> Services Critiques RDS';
+            }
+
+            const body = document.getElementById('services-body');
+            body.innerHTML = '';
+            (Array.isArray(services) ? services : [services]).forEach(s => {
+                let statusHTML = '';
+                if (s.Status === 'Audit') {
+                    const textClass = s.Percent === 100 ? 'text-success' : (s.Percent > 50 ? 'text-warning' : 'text-error');
+                    const barColor = s.Percent === 100 ? 'var(--success)' : (s.Percent > 50 ? 'var(--warning)' : 'var(--error)');
+
+                    // Génération des étiquettes pour les serveurs en erreur
+                    let nodesLabels = '';
+                    if (s.NodesDown && s.NodesDown.length > 0) {
+                        nodesLabels = `
+                            <div class="row flex-wrap gap-1 justify-center" style="margin-top:8px;">
+                                ${s.NodesDown.slice(0, 5).map(node => `<span class="badge badge-error" style="font-size:0.6rem; padding:2px 6px;">${node}</span>`).join('')}
+                                ${s.NodesDown.length > 5 ? `<span class="badge badge-error" style="font-size:0.6rem; padding:2px 6px;">+${s.NodesDown.length - 5}</span>` : ''}
+                            </div>
+                        `;
+                    }
+
+                    statusHTML = `
+                        <div class="stack gap-1" style="align-items:center;">
+                            <span class="font-black ${textClass}" style="font-size:0.9rem;">${s.Ratio}</span>
+                            <div class="progress-container" style="width:100px; height:6px;">
+                                <div class="progress-bar" style="width:${s.Percent}%; background:${barColor}"></div>
+                            </div>
+                            ${nodesLabels}
+                        </div>
+                    `;
+                } else {
+                    // L'API normalise déjà Status en 4/1, mais on reste tolérant au
+                    // texte : un statut non reconnu ne doit jamais se lire « ARRÊTÉ »
+                    // par défaut — annoncer un service à l'arrêt à tort fait perdre
+                    // du temps sur un incident inexistant.
+                    const raw = String(s.Status ?? '').toLowerCase();
+                    const isRunning = s.Status === 4 || raw === 'running' || raw === 'started';
+                    const known = s.Status === 4 || s.Status === 1 || raw === 'running' || raw === 'started' || raw === 'stopped';
+                    const statusClass = isRunning ? 'badge-success' : (known ? 'badge-error' : 'badge-warning');
+                    const label = isRunning ? 'ACTIF' : (known ? 'ARRÊTÉ' : `? (${s.StatusText || s.Status})`);
+                    statusHTML = `<span class="badge ${statusClass}">${label}</span>`;
+                }
+
+                body.innerHTML += `
+                    <tr>
+                        <td style="padding:15px;">
+                            <div class="font-bold text-strong">${s.DisplayName || s.Name || '—'}</div>
+                            <div class="text-muted font-semibold" style="font-size:0.75rem;">${s.Name || ''}</div>
+                        </td>
+                        <td class="text-center" style="padding:15px;">
+                            ${statusHTML}
+                        </td>
+                    </tr>
+                `;
+            });
+        } catch (e) {
+            console.error("Update error", e);
+        }
+    }
+
+    function onServerChange() { updateResources(); }
+    window.onServerChange = onServerChange;
+    updateResources();
+</script>
+{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header %}
+
+{% block title %}Rapports Système{% endblock %}
+{% block page_title %}Centre de Rapports & Analytique{% endblock %}
+
+{% block content %}
+<div id="section-reports" class="content-section">
+    <div class="card">
+        {{ card_header('assessment', "Génération d'Audits Opérationnels", 'text-accent') }}
+        <div class="row gap-4" style="margin: 20px 0 24px;">
+            <button class="btn-premium" onclick="generateReport('health')">
+                <span class="material-symbols-rounded">health_and_safety</span> SANTÉ SERVEUR
+            </button>
+            <button class="btn-premium" style="background:var(--slate-700);" onclick="generateReport('sessions')">
+                <span class="material-symbols-rounded">history_edu</span> AUDIT SESSIONS
+            </button>
+            <button class="btn-premium" style="background:var(--slate-700);" onclick="generateReport('performance')">
+                <span class="material-symbols-rounded">query_stats</span> PERFORMANCE
+            </button>
+        </div>
+
+        <div id="report-output-container">
+            <div id="report-output" class="console-box" style="min-height:450px; font-size:0.85rem;">
+                <div class="stack" style="height:100%; align-items:center; justify-content:center; opacity:0.3; text-align:center; padding-top:120px;">
+                    <span class="material-symbols-rounded" style="font-size:64px; margin-bottom:16px;">receipt_long</span>
+                    <div class="font-bold" style="font-size:1.1rem;">Aucun rapport généré</div>
+                    <div>Prêt pour l'extraction de données système</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function generateReport(type) {
+        const output = document.getElementById('report-output');
+        output.innerHTML = '<div class="text-center" style="padding:100px;"><span class="loader" style="width:40px; height:40px; border-width:4px;"></span><div class="text-subtle" style="font-size:1.1rem; margin-top:15px;">Génération de l\'audit: ' + type.toUpperCase() + '...</div></div>';
+
+        showToast(`Génération du rapport en cours...`, 'info');
+
+        try {
+            const res = await fetch(`/api/reports/${type}`);
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                showToast('Rapport prêt', 'success');
+                output.innerHTML = `
+                    <div style="background:var(--slate-800); padding:20px; border-radius:12px; margin-bottom:20px;">
+                        <div class="font-black" style="color:var(--console-fg); font-size:1.1rem;">📊 AUDIT: ${type.toUpperCase()}</div>
+                        <div class="text-muted font-bold" style="font-size:0.8rem;">Généré le ${new Date().toLocaleString()}</div>
+                    </div>
+                    <div style="color:var(--slate-200); line-height:1.5;">${data.content}</div>`;
+            } else {
+                showToast(`Échec: ${data.message}`, 'error');
+                output.innerHTML = `<div class="text-error" style="padding:20px;">Erreur : ${data.message}</div>`;
+            }
+        } catch (e) {
+            showToast('Erreur de communication', 'error');
+            output.innerHTML = `<div class="text-error" style="padding:20px;">Le service de rapport ne répond pas.</div>`;
+        }
+    }
+</script>
+<style>
+    .loader {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--accent-primary);
+        border-bottom-color: transparent;
+        border-radius: 50%;
+        display: inline-block;
+        animation: rotation 1s linear infinite;
+    }
+    @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+</style>
+{% endblock %}

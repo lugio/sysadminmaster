@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header %}
+
+{% block title %}Logs Système{% endblock %}
+{% block page_title %}Explorateur de Journaux{% endblock %}
+
+{% block content %}
+<div id="section-logs" class="content-section fade-in">
+    <div class="card">
+        <div class="row justify-between" style="margin-bottom:24px;">
+            {{ card_header('description', 'Sortie Console Broker', 'text-accent') }}
+            <span id="log-file-name" class="badge" style="background:var(--slate-100); color:var(--slate-500);"></span>
+        </div>
+        <div id="log-content" class="log-console">
+            Initialisation du flux de logs...
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function updateLogs() {
+        try {
+            const res = await fetch('/api/logs');
+            const data = await res.json();
+            document.getElementById('log-file-name').innerText = data.file.split('\\').pop();
+            document.getElementById('log-content').innerText = data.content.join('');
+            const logDiv = document.getElementById('log-content');
+            logDiv.scrollTop = logDiv.scrollHeight;
+        } catch (e) {}
+    }
+
+    updateLogs();
+    setInterval(updateLogs, 5000);
+</script>
+{% endblock %}

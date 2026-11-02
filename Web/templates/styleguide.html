@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header, tool_card, console_box, stat_card %}
+{% block title %}Design System{% endblock %}
+{% block page_title %}Design System{% endblock %}
+
+{% block content %}
+<div class="content-section">
+
+    <!-- Intro / règles ------------------------------------------------------->
+    <div class="card" style="margin-bottom:24px;">
+        {{ card_header('palette', 'Design System SysAdminMaster') }}
+        <p class="text-subtle" style="margin-bottom:16px;">
+            Source de vérité vivante de l'UI — <strong class="text-strong">v{{ app_version }}</strong>.
+            Tout composant affiché ici est le rendu réel des classes de
+            <span class="mono text-accent">style.css</span>. Pour garder une interface cohérente sur
+            toutes les pages : réutiliser ces classes, ne pas réinventer en inline.
+        </p>
+        <div class="stack gap-2">
+            <div class="row"><span class="material-symbols-rounded text-accent">check_circle</span> <span><strong>Couleurs</strong> : toujours via les tokens <span class="mono">var(--…)</span> — jamais de hex en dur dans les pages.</span></div>
+            <div class="row"><span class="material-symbols-rounded text-accent">check_circle</span> <span><strong>Espacement</strong> : grille de 8px (utilitaires <span class="mono">.gap-1…6</span>).</span></div>
+            <div class="row"><span class="material-symbols-rounded text-accent">check_circle</span> <span><strong>Layout</strong> : <span class="mono">.row</span> / <span class="mono">.stack</span> / <span class="mono">.flex</span> plutôt que <span class="mono">style="display:flex…"</span>.</span></div>
+            <div class="row"><span class="material-symbols-rounded text-accent">check_circle</span> <span><strong>Sobriété</strong> : pas de liseret de couleur en bordure de carte, pas d'ombre "glow" colorée — ombres neutres et discrètes uniquement.</span></div>
+            <div class="row"><span class="material-symbols-rounded text-accent">check_circle</span> <span><strong>Conteneurs</strong> : <span class="mono">.card</span> dans un <span class="mono">.content-section</span>.</span></div>
+            <div class="row"><span class="material-symbols-rounded text-accent">check_circle</span> <span><strong>Actions</strong> : <span class="mono">.btn-premium</span> (primaire) / <span class="mono">.btn-action</span> (neutre).</span></div>
+        </div>
+    </div>
+
+    <!-- Sommaire ancré -------------------------------------------------------->
+    <div class="card" style="margin-bottom:24px;">
+        {{ card_header('toc', 'Sommaire') }}
+        <div class="flex flex-wrap gap-2">
+            <a class="btn-action" href="#tokens">Palette &amp; tokens</a>
+            <a class="btn-action" href="#typo">Typographie</a>
+            <a class="btn-action" href="#buttons">Boutons</a>
+            <a class="btn-action" href="#toolcards">Tool cards</a>
+            <a class="btn-action" href="#badges">Badges &amp; statuts</a>
+            <a class="btn-action" href="#tables">Tables</a>
+            <a class="btn-action" href="#forms">Formulaires</a>
+            <a class="btn-action" href="#stats">Stat cards &amp; métriques</a>
+            <a class="btn-action" href="#console">Console</a>
+            <a class="btn-action" href="#toasts">Toasts</a>
+            <a class="btn-action" href="#utils">Utilitaires</a>
+        </div>
+    </div>
+
+    <!-- 1. TOKENS ------------------------------------------------------------->
+    <div id="tokens" class="card" style="margin-bottom:24px;">
+        {{ card_header('colors', 'Palette & tokens') }}
+
+        <div class="text-subtle uppercase font-black" style="font-size:0.7rem; margin-bottom:8px;">Accents</div>
+        <div class="flex flex-wrap gap-3" style="margin-bottom:20px;">
+            {% for name, var in [('Primary','--accent-primary'),('Secondary','--accent-secondary'),('Tertiary','--accent-tertiary')] %}
+            <div class="stack gap-1" style="width:150px;">
+                <div style="height:56px; border-radius:12px; border:1px solid var(--slate-200); background:var({{ var }});"></div>
+                <div class="font-bold text-strong" style="font-size:0.8rem;">{{ name }}</div>
+                <div class="mono text-subtle" style="font-size:0.7rem;">var({{ var }})</div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="text-subtle uppercase font-black" style="font-size:0.7rem; margin-bottom:8px;">Échelle Slate</div>
+        <div class="flex flex-wrap gap-2" style="margin-bottom:20px;">
+            {% for n in [50,100,200,300,400,500,600,700,800,900] %}
+            <div class="stack gap-1" style="width:88px;">
+                <div style="height:44px; border-radius:8px; border:1px solid var(--slate-200); background:var(--slate-{{ n }});"></div>
+                <div class="mono text-subtle" style="font-size:0.65rem;">slate-{{ n }}</div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="text-subtle uppercase font-black" style="font-size:0.7rem; margin-bottom:8px;">États sémantiques</div>
+        <div class="flex flex-wrap gap-3" style="margin-bottom:20px;">
+            {% for name, var in [('Success','--success'),('Warning','--warning'),('Error','--error'),('Info','--info')] %}
+            <div class="stack gap-1" style="width:150px;">
+                <div style="height:56px; border-radius:12px; border:1px solid var(--slate-200); background:var({{ var }});"></div>
+                <div class="font-bold text-strong" style="font-size:0.8rem;">{{ name }}</div>
+                <div class="mono text-subtle" style="font-size:0.7rem;">var({{ var }})</div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="text-subtle uppercase font-black" style="font-size:0.7rem; margin-bottom:8px;">Console / terminal</div>
+        <div class="flex flex-wrap gap-3">
+            {% for name, var in [('Fond','--console-bg'),('Texte','--console-fg'),('OK','--console-fg-ok'),('Info','--console-fg-info'),('Erreur','--console-fg-err')] %}
+            <div class="stack gap-1" style="width:120px;">
+                <div style="height:44px; border-radius:8px; border:1px solid var(--slate-200); background:var({{ var }});"></div>
+                <div class="mono text-subtle" style="font-size:0.65rem;">{{ name }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- 2. TYPOGRAPHIE -------------------------------------------------------->
+    <div id="typo" class="card" style="margin-bottom:24px;">
+        {{ card_header('text_fields', 'Typographie') }}
+        <div class="stack gap-3">
+            <div class="row justify-between" style="border-bottom:1px solid var(--slate-100); padding-bottom:8px;">
+                <span class="text-strong" style="font-size:2rem; font-weight:800;">Inter — Titre</span>
+                <span class="mono text-subtle" style="font-size:0.7rem;">800 · 2rem</span>
+            </div>
+            <div class="row justify-between" style="border-bottom:1px solid var(--slate-100); padding-bottom:8px;">
+                <span class="text-strong" style="font-size:1rem; font-weight:700;">Inter — Sous-titre de carte</span>
+                <span class="mono text-subtle" style="font-size:0.7rem;">700 · 1rem</span>
+            </div>
+            <div class="row justify-between" style="border-bottom:1px solid var(--slate-100); padding-bottom:8px;">
+                <span class="text-subtle">Inter — Corps de texte régulier (slate-500 / slate-700)</span>
+                <span class="mono text-subtle" style="font-size:0.7rem;">400 · 0.875rem</span>
+            </div>
+            <div class="row justify-between" style="border-bottom:1px solid var(--slate-100); padding-bottom:8px;">
+                <span class="uppercase text-subtle font-black" style="font-size:0.7rem;">Inter — Label majuscule</span>
+                <span class="mono text-subtle" style="font-size:0.7rem;">800 · 0.7rem · upper</span>
+            </div>
+            <div class="row justify-between">
+                <span class="mono text-strong">JetBrains Mono — 192.0.2.10 · v{{ app_version }}</span>
+                <span class="mono text-subtle" style="font-size:0.7rem;">mono</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. BOUTONS ------------------------------------------------------------>
+    <div id="buttons" class="card" style="margin-bottom:24px;">
+        {{ card_header('smart_button', 'Boutons') }}
+        <div class="flex flex-wrap gap-3" style="margin-bottom:16px;">
+            <button class="btn-premium"><span class="material-symbols-rounded">rocket_launch</span> Premium (primaire)</button>
+            <button class="btn-action"><span class="material-symbols-rounded">tune</span> Action (neutre)</button>
+            <button class="btn-premium btn-success"><span class="material-symbols-rounded">check</span> Succès</button>
+            <button class="btn-premium btn-warning"><span class="material-symbols-rounded">warning</span> Warning</button>
+            <button class="btn-premium btn-error"><span class="material-symbols-rounded">delete</span> Error</button>
+            <button class="btn-premium btn-info"><span class="material-symbols-rounded">info</span> Info</button>
+        </div>
+        <p class="mono text-subtle" style="font-size:0.72rem;">.btn-premium · .btn-action · .btn-{success,warning,error,info}</p>
+
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--slate-100);">
+            <div class="font-bold" style="font-size:0.8rem; margin-bottom:6px;">État désactivé</div>
+            <p class="text-subtle" style="font-size:0.78rem; margin-bottom:12px;">
+                Un bouton rendu inerte par JS (<span class="mono">btn.disabled = true</span>) doit se VOIR.
+                Sans style dédié il gardait sa couleur pleine et son curseur <span class="mono">pointer</span> :
+                l'utilisateur reclique, rien ne se passe, il croit l'interface plantée.
+                Le style est porté par le socle — aucune classe à ajouter, l'attribut suffit.
+            </p>
+            <div class="flex flex-wrap gap-3" style="margin-bottom:12px;">
+                <button class="btn-premium" disabled><span class="material-symbols-rounded">rocket_launch</span> Premium désactivé</button>
+                <button class="btn-action" disabled><span class="material-symbols-rounded">tune</span> Action désactivé</button>
+                <button class="btn-premium btn-error" disabled><span class="material-symbols-rounded">delete</span> Error désactivé</button>
+                <button class="btn-action btn-sm" disabled>Compact désactivé</button>
+            </div>
+            <p class="mono text-subtle" style="font-size:0.72rem;">button:disabled → opacity .55 · cursor not-allowed · pas de hover</p>
+            <p class="text-subtle" style="font-size:0.78rem; margin-top:10px;">
+                ⚠️ Après une action <strong>terminée</strong> (succès définitif), ne pas se contenter de désactiver le
+                bouton d'action : remplacer les commandes par une <strong>sortie unique</strong> (« Fermer »).
+                Laisser « Annuler » + « Réparer » grisés laisse croire qu'on peut encore annuler ou relancer.
+            </p>
+        </div>
+    </div>
+
+    <!-- 3ter. NOTICES ----------------------------------------------------------->
+    <div id="notices" class="card" style="margin-bottom:24px;">
+        {{ card_header('info', 'Notices — bandeaux d\'état de page') }}
+        <p class="text-subtle" style="font-size:0.82rem; margin-bottom:14px;">
+            Un <strong>notice</strong> annonce l'état de la page elle-même : agent hors-ligne, données
+            figées, mode dégradé. À ne pas confondre avec un toast (événement ponctuel, qui disparaît).
+            Quand une page affiche des chiffres qu'elle ne peut plus rafraîchir, elle doit le dire
+            <em>au-dessus</em> des chiffres — et désactiver les actions qui ne peuvent pas aboutir.
+        </p>
+        <div class="notice notice-warning" style="margin-bottom:10px;">
+            Agent RDS-BROKER hors-ligne depuis 12 min — les chiffres ci-dessous datent du dernier
+            heartbeat, et aucune action sur R: ne peut aboutir tant qu'il n'a pas repris.
+        </div>
+        <div class="notice notice-error" style="margin-bottom:10px;">
+            Connexion au master impossible — aucune donnée n'a pu être lue.
+        </div>
+        <div class="notice notice-info" style="margin-bottom:12px;">
+            Scan nocturne des tailles de profils programmé à 03h00.
+        </div>
+        <p class="mono text-subtle" style="font-size:0.72rem;">.notice + .notice-warning | .notice-error | .notice-info</p>
+        <p class="text-subtle" style="font-size:0.78rem; margin-top:10px;">
+            ⚠️ Sobriété : fond teinté plat, <strong>aucun liseret coloré, aucun glow</strong>.
+            Le template <code>/profiles</code> a longtemps utilisé <code>alert alert-warning</code> —
+            deux classes qui n'existaient dans aucune feuille : le bandeau s'affichait en texte nu,
+            donc l'information la plus importante de la page était la moins visible.
+        </p>
+    </div>
+
+    <!-- 3bis. TOOL CARDS -------------------------------------------------------->
+    <div id="toolcards" class="card" style="margin-bottom:24px;">
+        {{ card_header('widgets', 'Tool cards') }}
+        <p class="text-subtle" style="margin-bottom:12px;">
+            Composant partagé — remplace les 9 blocs quasi identiques de <span class="mono">tools.html</span>.
+            <span class="mono text-accent">{{ '{{ tool_card(icon, color, title, desc, action) }}' }}</span>.
+        </p>
+        <div class="tools-grid">
+            {{ tool_card('print', 'amber', 'Spouleur Impression', "Relance le service et purge la file d'attente locale.", 'restart_spooler') }}
+            {{ tool_card('dns', 'blue', 'Flush DNS & Réseau', 'Réinitialise le cache DNS local.', 'flush_dns') }}
+            {{ tool_card('security', 'red', 'Audit Sécurité', 'Analyse des comptes locaux et des stratégies de mots de passe.', 'audit_security') }}
+        </div>
+    </div>
+
+    <!-- 4. BADGES & STATUTS --------------------------------------------------->
+    <div id="badges" class="card" style="margin-bottom:24px;">
+        {{ card_header('verified', 'Badges & statuts') }}
+        <div class="flex flex-wrap items-center gap-3" style="margin-bottom:20px;">
+            <span class="badge badge-success">En ligne</span>
+            <span class="badge badge-warning">Dégradé</span>
+            <span class="badge badge-error">Hors ligne</span>
+            <span class="row gap-2"><span class="dot dot-green"></span> Agent actif</span>
+            <span class="row gap-2"><span class="dot dot-red"></span> Agent muet</span>
+        </div>
+        <div class="text-subtle uppercase font-black" style="font-size:0.7rem; margin-bottom:8px;">Barres de progression</div>
+        <div class="stack gap-3" style="max-width:420px;">
+            <div class="progress-container"><div class="progress-bar" style="width:32%;"></div></div>
+            <div class="progress-container"><div class="progress-bar" style="width:74%; background:var(--warning);"></div></div>
+            <div class="progress-container"><div class="progress-bar" style="width:95%; background:var(--error);"></div></div>
+        </div>
+    </div>
+
+    <!-- 5. TABLES ------------------------------------------------------------->
+    <div id="tables" class="card" style="margin-bottom:24px;">
+        {{ card_header('table_rows', 'Tables') }}
+        <p class="text-subtle" style="margin-bottom:12px;">
+            Règle du design system : <strong class="text-strong">toute table propose un filtre et un tri</strong>
+            — <span class="mono text-accent">table-utils.js</span>, zéro dépendance. En-têtes cliquables
+            (<span class="mono">data-sort="text|num"</span>), champ de filtre relié par
+            <span class="mono">data-filter-for="&lt;id-table&gt;"</span>.
+        </p>
+        <div class="table-toolbar">
+            <input type="text" class="form-control" placeholder="Filtrer les hôtes..." data-filter-for="sg-demo-table">
+        </div>
+        <div class="table-scroll">
+            <table id="sg-demo-table" data-enhance>
+                <thead><tr>
+                    <th data-sort="text">Hôte</th>
+                    <th data-sort="text">État</th>
+                    <th data-sort="num">Sessions</th>
+                    <th data-sort="text">Version</th>
+                </tr></thead>
+                <tbody>
+                    <tr><td class="font-bold text-strong">RDS-BROKER</td><td><span class="badge badge-success">En ligne</span></td><td>0</td><td class="mono">v{{ app_version }}</td></tr>
+                    <tr><td class="font-bold text-strong">RDSH01</td><td><span class="badge badge-success">En ligne</span></td><td>4</td><td class="mono">v{{ app_version }}</td></tr>
+                    <tr><td class="font-bold text-strong">RDSH02</td><td><span class="badge badge-warning">Dégradé</span></td><td>9</td><td class="mono text-muted">v2.9.2</td></tr>
+                    <tr><td class="font-bold text-strong">RDSH03</td><td><span class="badge badge-error">Hors ligne</span></td><td>—</td><td class="mono text-muted">—</td></tr>
+                    <tr><td class="font-bold text-strong">RDSH04</td><td><span class="badge badge-error">Hors ligne</span></td><td>—</td><td class="mono text-muted">—</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 6. FORMULAIRES -------------------------------------------------------->
+    <div id="forms" class="card" style="margin-bottom:24px;">
+        {{ card_header('edit_note', 'Formulaires') }}
+        <div class="flex flex-wrap gap-4" style="max-width:640px;">
+            <div class="stack gap-2" style="flex:1; min-width:220px;">
+                <label class="uppercase text-subtle font-black" style="font-size:0.7rem;">Champ texte</label>
+                <input class="form-control" type="text" placeholder="CONTOSO\\RDS-BROKER$">
+            </div>
+            <div class="stack gap-2" style="flex:1; min-width:220px;">
+                <label class="uppercase text-subtle font-black" style="font-size:0.7rem;">Sélecteur</label>
+                <select class="form-select">
+                    <option>Résumé de la Ferme (Tous)</option>
+                    <option>RDS-BROKER</option>
+                    <option>RDSH01</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. STAT CARDS & MÉTRIQUES --------------------------------------------->
+    <div id="stats" class="card" style="margin-bottom:24px;">
+        {{ card_header('insights', 'Stat cards & métriques') }}
+        <p class="mono text-subtle" style="font-size:0.72rem; margin-bottom:12px;">{{ '{{ stat_card(icon, label, value, soft) }}' }} — composant partagé, voir _macros.html</p>
+        <div class="stat-strip">
+            {{ stat_card('dns', 'Parc en ligne', '2 / 10', 'bg-success-soft') }}
+            {{ stat_card('groups', 'Sessions actives', '4', 'bg-primary-soft') }}
+            {{ stat_card('notifications_active', 'Alertes', '0', 'bg-warning-soft') }}
+        </div>
+        <div class="metric-box" style="margin-top:16px; max-width:420px;">
+            <div class="metric-header">
+                <span class="metric-label">CPU Broker</span>
+                <span class="metric-value text-accent">18 %</span>
+            </div>
+            <div class="progress-container"><div class="progress-bar" style="width:18%;"></div></div>
+        </div>
+    </div>
+
+    <!-- 8. CONSOLE ------------------------------------------------------------>
+    <div id="console" class="card" style="margin-bottom:24px;">
+        {{ card_header('terminal', 'Console / terminal') }}
+        <p class="text-subtle" style="margin-bottom:12px;">Bloc de sortie standard via <span class="mono text-accent">.console-box</span> (remplace les <span class="mono">&lt;pre&gt;</span> inline).</p>
+        <div class="console-box" style="max-height:160px;">
+<span style="color:var(--console-fg-ok);">[OK]  </span>Heartbeat RDS-BROKER reçu — cpu=18% ram=42%
+<span style="color:var(--console-fg-info);">[..]  </span>orchestrate_bootstrap → RDSH01 : installation agent v{{ app_version }}
+<span style="color:var(--console-fg-err);">[ERR] </span>RDSH03 : WinRM Accès refusé (RDS-BROKER$ non admin local)</div>
+    </div>
+
+    <!-- 9. TOASTS ------------------------------------------------------------->
+    <div id="toasts" class="card" style="margin-bottom:24px;">
+        {{ card_header('notifications', 'Toasts') }}
+        <div class="flex flex-wrap gap-3">
+            <button class="btn-action" onclick="showToast('Opération réussie.', 'success')">Succès</button>
+            <button class="btn-action" onclick="showToast('Attention, action en cours.', 'warning')">Warning</button>
+            <button class="btn-action" onclick="showToast('Une erreur est survenue.', 'error')">Error</button>
+            <button class="btn-action" onclick="showToast('Information contextuelle.', 'info')">Info</button>
+        </div>
+        <p class="mono text-subtle" style="font-size:0.72rem; margin-top:12px;">showToast(message, 'success' | 'warning' | 'error' | 'info')</p>
+    </div>
+
+    <!-- 10. UTILITAIRES ------------------------------------------------------->
+    <div id="utils" class="card" style="margin-bottom:24px;">
+        {{ card_header('grid_view', 'Utilitaires de layout & texte') }}
+        <p class="text-subtle" style="margin-bottom:16px;">
+            Introduits avec le Design System pour remplacer les primitives inline
+            (<span class="mono">display:flex</span>, <span class="mono">gap</span>, <span class="mono">align-items</span>…).
+            Migrer l'inline existant vers ces classes ; ne plus en écrire de nouveau.
+        </p>
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Classe</th><th>Effet</th></tr></thead>
+                <tbody>
+                    <tr><td class="mono">.row</td><td>flex + align-items:center + gap 8px</td></tr>
+                    <tr><td class="mono">.stack</td><td>flex column + gap 8px</td></tr>
+                    <tr><td class="mono">.flex / .flex-col / .flex-wrap / .flex-1</td><td>flexbox de base</td></tr>
+                    <tr><td class="mono">.items-center / .justify-between / .justify-center</td><td>alignement flex</td></tr>
+                    <tr><td class="mono">.gap-1 … .gap-6</td><td>4 / 8 / 12 / 16 / 24 px</td></tr>
+                    <tr><td class="mono">.text-center / .text-right</td><td>alignement texte</td></tr>
+                    <tr><td class="mono">.text-muted / .text-subtle / .text-strong / .text-accent</td><td>couleurs texte (tokens)</td></tr>
+                    <tr><td class="mono">.font-semibold / .font-bold / .font-black</td><td>poids</td></tr>
+                    <tr><td class="mono">.uppercase / .mono</td><td>casse majuscule / police monospace</td></tr>
+                    <tr><td class="mono">.console-box</td><td>bloc de sortie terminal</td></tr>
+                    <tr><td class="mono">.btn-sm</td><td>bouton compact (grille de cartes)</td></tr>
+                    <tr><td class="mono">button[disabled]</td><td>état inerte visible (opacity + not-allowed), automatique</td></tr>
+                    <tr><td class="mono">.table-toolbar / [data-filter-for]</td><td>barre de filtre au-dessus d'une table</td></tr>
+                    <tr><td class="mono">table[data-enhance] + th[data-sort]</td><td>tri au clic (table-utils.js) — obligatoire sur toute table</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Stub local — runTool() est la fonction réelle de tools.html (appel API + polling).
+    // Ici, uniquement pour démontrer le rendu/interaction des tool_card sans dépendance.
+    function runTool(action) {
+        showToast('Démo tool_card — action : ' + action, 'info');
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,725 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header %}
+
+{% block title %}Gestion des Sessions{% endblock %}
+{% block page_title %}Gestion des Sessions RDS{% endblock %}
+
+{% block content %}
+<style>
+    @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+    .spinner { animation: spin 1s linear infinite; }
+    /* Tooltip custom conso (remplace le title natif, illisible) */
+    #sam-tooltip {
+        position: fixed; z-index: 11000; pointer-events: none; display: none;
+        background: var(--slate-800, #1e293b); color: #e2e8f0;
+        border: 1px solid var(--slate-600, #475569); border-radius: 10px;
+        padding: 10px 14px; font-size: 0.72rem; max-width: 300px;
+        box-shadow: 0 8px 24px rgba(15,23,42,0.35);
+    }
+    #sam-tooltip .tt-head { font-weight: 800; margin-bottom: 6px; color: #f8fafc; }
+    #sam-tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; }
+    #sam-tooltip .tt-proc { color: #cbd5e1; }
+    #sam-tooltip .tt-val { font-weight: 700; color: #f1f5f9; white-space: nowrap; }
+    #sam-tooltip .tt-bar { height: 3px; border-radius: 2px; background: rgba(148,163,184,0.25); margin: 1px 0 4px; overflow: hidden; }
+    #sam-tooltip .tt-bar > div { height: 100%; background: #38bdf8; }
+    /* Fiche detail : blocs KPI + barres process */
+    .ud-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
+    .ud-kpi { background: var(--slate-50, #f8fafc); border: 1px solid var(--slate-100, #f1f5f9); border-radius: 12px; padding: 10px 8px; text-align: center; }
+    .ud-kpi .v { font-size: 1rem; font-weight: 800; }
+    .ud-kpi .l { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--slate-500, #64748b); font-weight: 700; margin-top: 3px; }
+    .ud-proc-row { display: flex; justify-content: space-between; gap: 12px; font-size: 0.78rem; padding-top: 6px; }
+    .ud-proc-bar { height: 4px; border-radius: 2px; background: var(--slate-100, #f1f5f9); overflow: hidden; margin-top: 2px; }
+    .ud-proc-bar > div { height: 100%; background: var(--accent-primary, #2563eb); }
+</style>
+<div id="section-sessions" class="content-section" style="max-width: 1600px; margin: 0 auto;">
+    <div class="card sessions-card">
+        <div class="row justify-between flex-wrap gap-4" style="margin-bottom:24px;">
+            {{ card_header('groups', 'Sessions Acteurs du Système', 'text-accent') }}
+            <div class="row gap-3">
+                <select id="state-filter" onchange="applyFilters()" class="form-select" style="min-width:140px;">
+                    <option value="All">Tous les États</option>
+                    <option value="Active">Actives</option>
+                    <option value="Disconnected">Déconnectées</option>
+                </select>
+                <select id="load-filter" onchange="applyFilters()" class="form-select" style="min-width:160px;" title="Filtrer par consommation de ressources (agents v2.25.0+)">
+                    <option value="All">Toute conso</option>
+                    <option value="cpu10">CPU ≥ 10 %</option>
+                    <option value="ram1024">RAM ≥ 1 Go</option>
+                    <option value="ram2048">RAM ≥ 2 Go</option>
+                </select>
+                <input type="text" id="sessions-search" class="form-control" placeholder="Filtrer par utilisateur..." onkeyup="applyFilters()" style="width:200px;">
+                <button class="btn-premium" onclick="refreshSessions()">
+                    <span class="material-symbols-rounded">refresh</span> ACTUALISER
+                </button>
+            </div>
+        </div>
+
+        <div id="filter-stats" class="row justify-between" style="background:var(--slate-50); padding:16px 24px; border-radius:16px; margin-bottom:24px; font-size:0.85rem; border:1px solid var(--slate-100);">
+            <div class="row" style="gap:24px;">
+                <span class="text-muted uppercase font-black row gap-2" style="font-size:0.85rem;"><span class="material-symbols-rounded" style="font-size:18px;">analytics</span> ANALYSE</span>
+                <span id="stats-total" class="font-bold text-strong">Total: --</span>
+                <span id="stats-active" class="text-success font-bold">Actives: --</span>
+                <span id="stats-disconnected" class="text-warning font-bold">Déco: --</span>
+                <span id="stats-filtered" class="font-black" style="background:var(--info-light); color:var(--accent-primary); padding:4px 12px; border-radius:9999px;">Affichées: --</span>
+            </div>
+            <button onclick="clearFilters()" class="btn-action btn-sm" style="background:var(--slate-200);">RÉINITIALISER</button>
+        </div>
+
+        <div class="card" style="margin-bottom:24px;">
+            <h4 class="text-muted uppercase font-black row gap-2" style="margin-top:0; margin-bottom:16px; font-size:0.75rem;">
+                <span class="material-symbols-rounded text-accent">campaign</span> Communication de masse
+            </h4>
+            <div class="row flex-wrap gap-3">
+                <select id="message-template" onchange="fillTemplate()" class="form-select" style="flex:1; min-width:180px;">
+                    <option value="">-- Choisir un modèle --</option>
+                    <option value="Maintenance immédiate (5m)">Maintenance Immédiate</option>
+                    <option value="Maintenance à 18h00">Maintenance Planning</option>
+                    <option value="Surcharge système détectée">Alerte Surcharge</option>
+                    <option value="custom">-- Message Libre --</option>
+                </select>
+                <input type="text" id="broadcast-msg-input" placeholder="Texte de l'alerte..." class="form-control" style="flex:3; min-width:250px;">
+                <button class="btn-action btn-premium" onclick="broadcastMessage('all')">
+                    <span class="material-symbols-rounded">campaign</span> DIFFUSER À TOUS
+                </button>
+                <button class="btn-action" onclick="broadcastMessage('filtered')" style="background:var(--slate-600);">
+                    <span class="material-symbols-rounded">filter_alt</span> DIFFUSER AUX FILTRÉS
+                </button>
+            </div>
+        </div>
+
+        <div class="table-scroll" style="margin-top: 10px; border-radius: 12px; border: 1px solid var(--slate-100);">
+            <table id="sessions-table" data-enhance style="width: 100%; border-collapse: separate; border-spacing: 0;">
+                <thead style="position: sticky; top: 0; z-index: 10; background: var(--slate-50);">
+                    <tr>
+                        <th class="text-center" data-no-sort style="width: 40px; padding: 15px;"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
+                        <th data-sort="text" style="padding: 15px;">UTILISATEUR</th>
+                        <th data-sort="text" style="padding: 15px;">SERVEUR RDS</th>
+                        <th data-sort="num" style="padding: 15px;" title="Inactivité — tri par durée réelle">INACTIVITÉ</th>
+                        <th data-sort="num" style="padding: 15px;" title="CPU consommé par les process de l'utilisateur (normalisé cœurs) — cliquer pour classer par conso. Agents v2.25.0+">CPU</th>
+                        <th data-sort="num" style="padding: 15px;" title="Mémoire (WorkingSet) des process de l'utilisateur — cliquer pour classer par conso. Agents v2.25.0+">RAM</th>
+                        <th data-sort="text" style="padding: 15px;">ÉTAT</th>
+                        <th class="text-right" data-no-sort style="padding: 15px;">ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody id="sessions-body">
+                    <tr><td colspan="8" class="text-center text-muted" style="padding:40px;">Collecte des sessions...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="row justify-between" style="margin-top:24px; padding-top:20px; border-top:1px solid var(--slate-100);">
+            <div class="row gap-3">
+                <button class="btn-action btn-premium" onclick="bulkAction('message')">
+                     <span class="material-symbols-rounded">chat_bubble</span> MESSAGE
+                </button>
+                <button class="btn-action btn-warning" onclick="bulkAction('disconnect')">
+                     <span class="material-symbols-rounded">logout</span> DÉCONNECTER
+                </button>
+                <button class="btn-action btn-error" onclick="bulkAction('logoff')">
+                     <span class="material-symbols-rounded">power_settings_new</span> FERMER
+                </button>
+            </div>
+            <div class="text-muted uppercase font-bold" style="font-size:0.75rem;">
+                Actions groupées sur la sélection
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const BROKER = {{ broker_host | tojson }};
+    let allSessions = [];
+    let filteredSessions = [];
+    let liveViewInterval = null;
+    
+    async function refreshSessions(retries = 1) {
+        try {
+            const res = await fetch('/api/sessions');
+            allSessions = await res.json();
+            if (!Array.isArray(allSessions)) allSessions = allSessions ? [allSessions] : [];
+            applyFilters();
+        } catch (e) {
+            if (retries > 0) {
+                setTimeout(() => refreshSessions(retries - 1), 1000);
+            } else {
+                showToast('Erreur lors de la récupération des sessions', 'error');
+            }
+        }
+    }
+
+    function applyFilters() {
+        const serverQuery = document.getElementById('global-server-filter').value;
+        const stateQuery = document.getElementById('state-filter').value;
+        const userQuery = document.getElementById('sessions-search').value.toLowerCase();
+        
+        filteredSessions = allSessions;
+        
+        if (serverQuery !== 'All') {
+            const shortQuery = serverQuery.split('.')[0].toUpperCase();
+            filteredSessions = filteredSessions.filter(s => {
+                const host = (s.HostServer || "").split('.')[0].toUpperCase();
+                if (shortQuery === 'BROKER') return host.includes('BROKER');
+                return host === shortQuery;
+            });
+        }
+
+        if (stateQuery !== 'All') {
+            filteredSessions = filteredSessions.filter(s => {
+                const state = s.SessionState || '';
+                if (stateQuery === 'Active') return state.includes('Active') || state.includes('Actif');
+                return state.includes('Disc') || state.includes('Deco');
+            });
+        }
+        
+        if (userQuery) {
+            filteredSessions = filteredSessions.filter(s => 
+                (s.UserName && s.UserName.toLowerCase().includes(userQuery)) ||
+                (s.HostServer && s.HostServer.toLowerCase().includes(userQuery))
+            );
+        }
+
+        const loadQuery = document.getElementById('load-filter').value;
+        if (loadQuery !== 'All') {
+            // Une session sans mesure (agent < 2.25.0) ne matche jamais un filtre
+            // de conso : on filtre sur ce qu'on SAIT, pas sur ce qu'on suppose.
+            filteredSessions = filteredSessions.filter(s => {
+                if (loadQuery === 'cpu10') return (s.CpuPct ?? -1) >= 10;
+                if (loadQuery === 'ram1024') return (s.MemMB ?? -1) >= 1024;
+                if (loadQuery === 'ram2048') return (s.MemMB ?? -1) >= 2048;
+                return true;
+            });
+        }
+
+        renderSessions(filteredSessions);
+        updateStats(filteredSessions);
+    }
+
+    function clearFilters() {
+        document.getElementById('global-server-filter').value = 'All';
+        document.getElementById('state-filter').value = 'All';
+        document.getElementById('load-filter').value = 'All';
+        document.getElementById('sessions-search').value = '';
+        localStorage.setItem('sam_last_server', 'All');
+        updateGlobalStats();
+        applyFilters();
+    }
+
+    function updateStats(filtered) {
+        const active = filtered.filter(s => (s.SessionState || '').includes('Act')).length;
+        const disconnected = filtered.length - active;
+
+        document.getElementById('stats-total').innerText = `Total: ${allSessions.length}`;
+        document.getElementById('stats-active').innerText = `Actives: ${active}`;
+        document.getElementById('stats-disconnected').innerText = `Déco: ${disconnected}`;
+        document.getElementById('stats-filtered').innerText = `Affichées: ${filtered.length}`;
+    }
+
+    /** Échappement : UserName et HostServer viennent de l'AD et sont réinjectés
+     *  dans des attributs onclick. Une apostrophe (O'Brien) casserait le HTML. */
+    function esc(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => (
+            { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+        ));
+    }
+
+    /** `query user` renvoie l'inactivité au format Windows BRUT, affiché tel quel
+     *  jusqu'ici — c'est ambigu et ça fausse le tri :
+     *    "."     = session active à l'instant           (affiché "." : illisible)
+     *    "6"     = 6 MINUTES                            (affiché "6")
+     *    "7:42"  = 7 HEURES 42                          (affiché "7:42")
+     *    "3+05:12" = 3 JOURS 5h12
+     *  Un « 6 » et un « 7:42 » se ressemblent alors qu'il y a un facteur 77 entre
+     *  les deux — or repérer les sessions dormantes est LA raison d'être de cette
+     *  page. Pire, le tri était `text` : "11" < "6" en alphabétique, donc trier
+     *  par inactivité donnait un ordre absurde.
+     *  On renvoie donc {label lisible, minutes} — les minutes alimentent
+     *  data-sort-value pour un tri numérique réel (cf. table-utils.js). */
+    function parseIdle(raw) {
+        const v = String(raw ?? '').trim();
+        if (!v || v === '.' || v === 'none' || v === 'aucun') return { label: 'actif', minutes: 0 };
+        let m = v.match(/^(\d+)\+(\d+):(\d+)$/);            // j+hh:mm
+        if (m) {
+            const mins = (+m[1]) * 1440 + (+m[2]) * 60 + (+m[3]);
+            return { label: `${m[1]}j ${m[2]}h${m[3]}`, minutes: mins };
+        }
+        m = v.match(/^(\d+):(\d+)$/);                        // hh:mm
+        if (m) return { label: `${+m[1]}h${m[2]}`, minutes: (+m[1]) * 60 + (+m[2]) };
+        m = v.match(/^(\d+)$/);                              // minutes
+        if (m) {
+            const mins = +m[1];
+            if (mins < 60) return { label: `${mins} min`, minutes: mins };
+            return { label: `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}`, minutes: mins };
+        }
+        return { label: v, minutes: -1 };                     // format inconnu : ne pas mentir
+    }
+
+    /** Mémoire en Mo -> libellé lisible. */
+    function fmtMem(mb) {
+        if (mb == null) return '—';
+        return mb >= 1024 ? (mb / 1024).toFixed(1).replace('.', ',') + ' Go' : Math.round(mb) + ' Mo';
+    }
+
+    /** Cellules CPU/RAM d'une session. Sans mesure (agent < 2.25.0) : « — » avec
+     *  l'explication en title — un vide doit se lire « pas mesuré », jamais « 0 ». */
+    function loadCells(s) {
+        if (s.CpuPct == null && s.MemMB == null) {
+            return `
+                <td class="text-muted" data-sort-value="-1" title="Non mesuré — agent < 2.25.0 sur cet hôte">—</td>
+                <td class="text-muted" data-sort-value="-1" title="Non mesuré — agent < 2.25.0 sur cet hôte">—</td>`;
+        }
+        const tipkey = `${s.UserName}|${s.HostServer}`;
+        // CPU séparément nullable : sur un hôte dont la classe perf WMI est
+        // corrompue (constaté sur un hôte de test), la RAM reste mesurée mais pas le CPU — « — »
+        // avec explication, jamais un 0 inventé.
+        let cpuCell;
+        if (s.CpuPct == null) {
+            cpuCell = `<td class="text-muted" data-sort-value="-1" data-tipkey="${esc(tipkey)}">—</td>`;
+        } else {
+            const cpu = s.CpuPct;
+            const cpuCls = cpu >= 25 ? 'text-error font-bold' : (cpu >= 10 ? 'text-warning font-bold' : 'text-subtle font-semibold');
+            cpuCell = `<td class="${cpuCls}" data-sort-value="${cpu}" data-tipkey="${esc(tipkey)}">${cpu.toFixed(1).replace('.', ',')} %</td>`;
+        }
+        const mem = s.MemMB ?? 0;
+        const memCls = mem >= 2048 ? 'text-error font-bold' : (mem >= 1024 ? 'text-warning font-bold' : 'text-subtle font-semibold');
+        return cpuCell + `
+            <td class="${memCls}" data-sort-value="${mem}" data-tipkey="${esc(tipkey)}">${fmtMem(mem)}</td>`;
+    }
+
+    /** Top process : agent 2.25.2+ envoie des objets {name, mem_mb, cpu, n},
+     *  2.25.1 envoyait des noms seuls — les deux formes s'affichent. */
+    function normTop(top) {
+        return (top || []).map(t => typeof t === 'string' ? { name: t } : t);
+    }
+
+    // ---- Tooltip custom au survol des cellules CPU/RAM (délégué) ----
+    function ensureTooltip() {
+        let el = document.getElementById('sam-tooltip');
+        if (!el) { el = document.createElement('div'); el.id = 'sam-tooltip'; document.body.appendChild(el); }
+        return el;
+    }
+    function tooltipHtml(s) {
+        const tops = normTop(s.TopProcs);
+        const maxMem = Math.max(1, ...tops.map(t => t.mem_mb ?? 0));
+        let h = `<div class="tt-head">${esc(s.UserName)} · ${esc((s.HostServer || '').split('.')[0])}</div>`;
+        h += `<div class="tt-row"><span>CPU</span><span class="tt-val">${s.CpuPct != null ? s.CpuPct.toFixed(1).replace('.', ',') + ' %' : 'non mesurable'}</span></div>`;
+        h += `<div class="tt-row"><span>Mémoire</span><span class="tt-val">${fmtMem(s.MemMB)}</span></div>`;
+        h += `<div class="tt-row"><span>Process</span><span class="tt-val">${s.Procs ?? '—'}</span></div>`;
+        if (tops.length) {
+            h += `<div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(148,163,184,0.25);">`;
+            tops.forEach(t => {
+                const det = [t.mem_mb != null ? fmtMem(t.mem_mb) : null, t.cpu != null && t.cpu > 0 ? t.cpu.toFixed(1).replace('.', ',') + ' %' : null].filter(Boolean).join(' · ');
+                h += `<div class="tt-row"><span class="tt-proc">${esc(t.name)}${t.n > 1 ? ` ×${t.n}` : ''}</span><span class="tt-val">${det || ''}</span></div>`;
+                if (t.mem_mb != null) h += `<div class="tt-bar"><div style="width:${Math.round(100 * t.mem_mb / maxMem)}%"></div></div>`;
+            });
+            h += `</div>`;
+        }
+        return h;
+    }
+    function bindLoadTooltips() {
+        const tbody = document.getElementById('sessions-body');
+        const tip = ensureTooltip();
+        tbody.addEventListener('mouseover', (e) => {
+            const td = e.target.closest('td[data-tipkey]');
+            if (!td) return;
+            const [u, h] = td.dataset.tipkey.split('|');
+            const s = allSessions.find(x => x.UserName === u && x.HostServer === h);
+            if (!s || (s.CpuPct == null && s.MemMB == null)) return;
+            tip.innerHTML = tooltipHtml(s);
+            tip.style.display = 'block';
+        });
+        tbody.addEventListener('mousemove', (e) => {
+            if (tip.style.display !== 'block') return;
+            const pad = 14;
+            let x = e.clientX + pad, y = e.clientY + pad;
+            const r = tip.getBoundingClientRect();
+            if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
+            if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
+            tip.style.left = x + 'px'; tip.style.top = y + 'px';
+        });
+        tbody.addEventListener('mouseout', (e) => {
+            if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('td[data-tipkey]')) tip.style.display = 'none';
+        });
+    }
+
+    /** Fiche détail utilisateur : session + conso + jeton O365 + profil +
+     *  contexte hôte, assemblés côté API depuis le dernier heartbeat. */
+    async function openUserDetail(user, server) {
+        const overlay = document.createElement('div');
+        overlay.id = 'user-detail-modal';
+        overlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:9999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(6px);";
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        overlay.innerHTML = `
+            <div style="background:var(--card-bg, #fff); padding:26px 30px; border-radius:20px; max-width:560px; width:92%; max-height:88vh; overflow-y:auto; box-shadow:var(--shadow-lg, 0 20px 50px rgba(0,0,0,0.25)); border:1px solid var(--slate-200);">
+                <div class="row justify-between" style="margin-bottom:4px;">
+                    <div class="row gap-3">
+                        <span class="material-symbols-rounded text-accent" style="font-size:30px;">person</span>
+                        <div>
+                            <h3 style="margin:0; font-size:1.05rem;">${esc(user)}</h3>
+                            <span class="text-muted" style="font-size:0.75rem;" id="ud-subtitle">${esc(server)}</span>
+                        </div>
+                    </div>
+                    <button class="btn-action btn-sm" onclick="document.getElementById('user-detail-modal').remove()"><span class="material-symbols-rounded" style="font-size:16px;">close</span></button>
+                </div>
+                <div id="user-detail-body" class="text-muted" style="min-height:120px; font-size:0.85rem;">Chargement…</div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const line = (label, value, cls = '') =>
+            `<div class="row justify-between" style="padding:7px 0; border-bottom:1px solid var(--slate-100);">
+                <span class="text-muted uppercase font-bold" style="font-size:0.68rem;">${label}</span>
+                <span class="${cls || 'font-semibold text-strong'}" style="font-size:0.85rem; text-align:right;">${value}</span>
+            </div>`;
+        const kpi = (value, label, cls = '') =>
+            `<div class="ud-kpi"><div class="v ${cls}">${value}</div><div class="l">${label}</div></div>`;
+
+        try {
+            const r = await fetch(`/api/user-detail?user=${encodeURIComponent(user)}&server=${encodeURIComponent(server)}`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Erreur');
+
+            const sess = d.session, load = d.load, o365 = d.o365, prof = d.profile, host = d.host;
+            const idle = sess ? parseIdle(sess.IdleTime) : null;
+            let html = '';
+
+            // Rangée de KPI
+            const o365Map = { ok: ['OK', 'text-success'], stale: ['Périmé', 'text-error'], missing: ['Absent', 'text-warning'] };
+            const [o365Label, o365Cls] = o365 ? (o365Map[o365.status] || [o365.status || '?', '']) : ['—', 'text-muted'];
+            html += `<div class="ud-kpis">`;
+            html += kpi(load && load.cpu != null ? load.cpu.toFixed(1).replace('.', ',') + ' %' : '—', 'CPU', load && (load.cpu ?? 0) >= 10 ? 'text-warning' : '');
+            html += kpi(load ? fmtMem(load.mem_mb) : '—', 'Mémoire', load && (load.mem_mb ?? 0) >= 2048 ? 'text-error' : (load && (load.mem_mb ?? 0) >= 1024 ? 'text-warning' : ''));
+            html += kpi(load ? (load.procs ?? '—') : '—', 'Process');
+            html += kpi(o365Label, 'Jeton O365', o365Cls);
+            html += `</div>`;
+
+            // Top process avec barres proportionnelles
+            const tops = load ? normTop(load.top) : [];
+            if (tops.length) {
+                const maxMem = Math.max(1, ...tops.map(t => t.mem_mb ?? 0));
+                html += `<div style="margin-bottom:10px;"><span class="text-muted uppercase font-bold" style="font-size:0.68rem;">Top process</span>`;
+                tops.forEach(t => {
+                    const det = [t.mem_mb != null ? fmtMem(t.mem_mb) : null, t.cpu != null && t.cpu > 0 ? t.cpu.toFixed(1).replace('.', ',') + ' %' : null].filter(Boolean).join(' · ');
+                    html += `<div class="ud-proc-row"><span class="font-semibold text-strong">${esc(t.name)}${t.n > 1 ? ` <span class="text-muted">×${t.n}</span>` : ''}</span><span class="text-subtle font-bold">${det || ''}</span></div>`;
+                    if (t.mem_mb != null) html += `<div class="ud-proc-bar"><div style="width:${Math.round(100 * t.mem_mb / maxMem)}%"></div></div>`;
+                });
+                html += `</div>`;
+            } else if (!load) {
+                html += line('Conso ressources', `non mesurée (agent ${esc(d.agent_version || '?')} — requiert 2.25.0+)`, 'text-muted');
+            }
+            if (load && load.cpu == null) {
+                html += `<div class="text-muted" style="font-size:0.7rem; margin-bottom:8px;">CPU non mesurable sur cet hôte (compteurs perf indisponibles).</div>`;
+            }
+
+            // Session
+            html += line('Session', sess ? `${esc(sess.SessionState)} (id ${esc(sess.SessionId)})` : 'aucune session en cours');
+            if (idle) html += line('Inactivité', idle.label, idle.minutes >= 240 ? 'text-warning font-bold' : '');
+
+            // Jeton O365 : âge précis
+            if (o365 && o365.age_days != null) html += line('Âge du jeton O365', `${o365.age_days} j`, o365.status === 'stale' ? 'text-error font-bold' : '');
+            if (!o365) html += line('Office 365', 'pas de profil Office sur cet hôte', 'text-muted');
+
+            // Profil — SizeMB peut valoir la CHAÎNE "Scan requis" sur les hôtes de
+            // session (tailles scannées uniquement sur R: du broker) : Number() +
+            // isFinite avant tout formatage, sinon « NaN Mo » (constaté 27/08).
+            if (prof) {
+                const rawSize = Number(prof.SizeMB);
+                const psize = Number.isFinite(rawSize) ? fmtMem(rawSize) : 'taille non scannée (hôte de session)';
+                html += line('Profil', psize, Number.isFinite(rawSize) && rawSize >= 10240 ? 'text-warning font-bold' : (Number.isFinite(rawSize) ? '' : 'text-muted'));
+                if (prof.LastWriteTime) html += line('Dernière activité profil', esc(prof.LastWriteTime));
+                if (Number.isFinite(rawSize) && prof.ScannedAt) html += line('Taille mesurée le', esc(prof.ScannedAt), 'text-muted');
+            }
+
+            // Contexte hôte : situer la conso du user dans celle de la machine
+            if (host) {
+                const parts = [];
+                if (host.cpu != null) parts.push(`CPU ${Number(host.cpu).toFixed(1).replace('.', ',')} %`);
+                if (host.ram_percent != null) parts.push(`RAM ${Number(host.ram_percent).toFixed(0)} %${host.ram_total_gb ? ' de ' + Math.round(host.ram_total_gb) + ' Go' : ''}`);
+                if (host.sessions_total != null) parts.push(`${host.sessions_total} session(s) dont ${host.sessions_active ?? '?'} active(s)`);
+                html += line(`Hôte ${esc(server)}`, parts.join(' · ') || '—');
+                const sub = document.getElementById('ud-subtitle');
+                if (sub && host.os) sub.innerText = `${server} — ${host.os}${host.uptime ? ' · allumé depuis ' + host.uptime : ''}`;
+            }
+
+            html += `<div class="text-muted" style="font-size:0.68rem; margin-top:12px;">Données du dernier heartbeat de ${esc(server)}${d.received_at ? ' (' + esc(d.received_at.substring(11, 19)) + ')' : ''}.</div>`;
+            document.getElementById('user-detail-body').innerHTML = html;
+        } catch (e) {
+            const body = document.getElementById('user-detail-body');
+            if (body) body.innerHTML = `<span class="text-error">Détail indisponible : ${esc(e.message)}</span>`;
+        }
+    }
+
+    function renderSessions(sessions) {
+        const body = document.getElementById('sessions-body');
+        if (sessions.length === 0) {
+            body.innerHTML = '<tr><td colspan="8" class="text-center text-muted" style="padding:40px;">Aucune session trouvée avec ces filtres</td></tr>';
+            return;
+        }
+
+        body.innerHTML = sessions.map(s => {
+            const isActive = s.SessionState && s.SessionState.includes('Active');
+            const idle = parseIdle(s.IdleTime);
+            const u = esc(s.UserName), h = esc(s.HostServer), id = esc(s.SessionId);
+            // Une session déconnectée qui dort depuis > 4 h consomme des ressources
+            // pour rien : c'est la candidate à la déconnexion, on la signale.
+            const dormante = !isActive && idle.minutes >= 240;
+            return `
+                <tr>
+                    <td><input type="checkbox" class="session-cb" data-id="${id}" data-user="${u}" data-server="${h}"></td>
+                    <td><div class="font-bold text-strong">${u}</div></td>
+                    <td><div class="text-subtle font-bold" style="font-size:0.85rem;">${h}</div></td>
+                    <td class="${dormante ? 'text-warning font-bold' : 'text-muted font-semibold'}" data-sort-value="${idle.minutes}"
+                        title="Valeur brute Windows : ${esc(s.IdleTime || '—')}">${idle.label}</td>
+                    ${loadCells(s)}
+                    <td><span class="badge font-black" style="background:${isActive ? 'var(--success-light)' : 'var(--warning-light)'}; color:${isActive ? 'var(--success)' : 'var(--warning)'};">${esc(s.SessionState)}</span></td>
+                    <td class="text-right">
+                        <div class="row justify-end gap-2">
+                            <button class="btn-action" title="Détails utilisateur (conso, jeton O365, profil)" onclick="openUserDetail('${u}', '${h}')"><span class="material-symbols-rounded" style="font-size:16px;">analytics</span></button>
+                            <button class="btn-action" title="Message" onclick="runAction('message', '${id}', '${u}', '${h}')"><span class="material-symbols-rounded" style="font-size:16px;">chat_bubble</span></button>
+                            <button class="btn-action" title="Aperçu (Snapshot)" onclick="openLiveView('${id}', '${u}', '${h}')" style="background:var(--success-light); color:var(--success);"><span class="material-symbols-rounded" style="font-size:16px;">photo_camera</span></button>
+                            <button class="btn-action" title="Shadow (Contrôle)" onclick="runAction('shadow', '${id}', '${u}', '${h}')" style="background:var(--info-light); color:var(--accent-primary);"><span class="material-symbols-rounded" style="font-size:16px;">visibility</span></button>
+                            <button class="btn-action" title="Déconnexion" onclick="runAction('disconnect', '${id}', '${u}', '${h}')" style="background:var(--slate-100); color:var(--slate-600);"><span class="material-symbols-rounded" style="font-size:16px;">logout</span></button>
+                            <button class="btn-action" title="Fermer la session (Force)" onclick="runAction('logoff', '${id}', '${u}', '${h}')" style="background:var(--error-light); color:var(--error);"><span class="material-symbols-rounded" style="font-size:16px;">power_settings_new</span></button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    async function runAction(action, sessionId, user, server) {
+        let message = '';
+        if (action === 'message') {
+            message = prompt(`Message pour ${user} (${server}):`, "Veuillez fermer votre session pour maintenance.");
+            if (!message) return;
+        } else if (!confirm(`Confirmer ${action} pour ${user} sur ${server} ?`)) {
+            return;
+        }
+        
+        showToast(`Envoi de l'ordre vers ${server}...`, 'info');
+
+        try {
+            const res = await fetch('/api/actions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action, sessionId, user, server, message})
+            });
+            const result = await res.json();
+            
+            if (result.status === 'success') {
+                if (action === 'shadow') {
+                    pollShadowResult(result.commandId, server, user);
+                } else {
+                    showToast(result.message, 'success');
+                    setTimeout(refreshSessions, 2000);
+                }
+            } else {
+                showToast('Erreur: ' + result.message, 'error');
+            }
+        } catch (e) {
+            showToast('Erreur de communication', 'error');
+        }
+    }
+
+    async function pollShadowResult(cmdId, server, user) {
+        showToast("Initialisation du canal de contrôle...", "info");
+        let attempts = 0;
+        const interval = setInterval(async () => {
+            attempts++;
+            const res = await fetch(`/api/command-status/${cmdId}`);
+            const data = await res.json();
+            
+            if (data.status === 'success') {
+                clearInterval(interval);
+                const parts = data.result.split('|');
+                const host = parts[1];
+                const sid = parts[2];
+                const cmd = `mstsc /v:${host} /shadow:${sid} /control /noConsentPrompt`;
+                
+                const shadowModal = document.createElement('div');
+                shadowModal.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(8px);";
+                shadowModal.innerHTML = `
+                    <div style="background:white; padding:32px; border-radius:24px; max-width:500px; width:90%; box-shadow:0 20px 50px rgba(0,0,0,0.3); text-align:center;">
+                        <span class="material-symbols-rounded" style="font-size:64px; color:var(--accent-primary); margin-bottom:16px;">terminal</span>
+                        <h2 style="margin:0 0 8px 0; color:var(--slate-900);">Lancer le Contrôle</h2>
+                        <p style="color:var(--slate-500); margin-bottom:24px;">Exécutez cette commande sur votre poste :</p>
+                        <div class="console-box" style="color:var(--console-fg-ok); font-size:13px; margin-bottom:24px; word-break:break-all; cursor:pointer;" onclick="navigator.clipboard.writeText('${cmd}'); showToast('Copié !', 'success');">${cmd}</div>
+                        <button class="btn-premium" style="width:100%;" onclick="this.parentElement.parentElement.remove()">FERMER</button>
+                    </div>
+                `;
+                document.body.appendChild(shadowModal);
+            }
+            else if (data.status === 'error') {
+                // L'agent a répondu une erreur (ex: "Action inconnue: shadow" sur un agent
+                // ancien, ou échec d'ouverture de session) -> la remonter telle quelle au
+                // lieu de laisser le spinner aller au timeout générique. Portage QA 2026-06-22.
+                clearInterval(interval);
+                showToast("Shadow impossible : " + (data.result || "action refusée par l'agent"), "error");
+                return;
+            }
+            // Budget porté à 20s : le round-trip via le relais broker + la cadence
+            // heartbeat des agents anciens dépasse souvent 10s -> sinon on tombait sur le
+            // timeout AVANT la vraie réponse (succès ou erreur) de l'agent. QA 2026-06-22.
+            if (attempts > 20) { clearInterval(interval); showToast("Timeout shadow : l'agent n'a pas répondu (agent hors-ligne ou version sans shadow)", "error"); }
+        }, 1000);
+    }
+
+    async function openLiveView(sid, user, server) {
+        const modal = document.createElement('div');
+        modal.id = 'live-view-modal';
+        modal.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.9); z-index:10000; display:flex; flex-direction:column; align-items:center; justify-content:center; backdrop-filter:blur(10px); color:white;";
+        modal.innerHTML = `
+            <div style="width:90%; max-width:1200px; background:var(--slate-800); border-radius:24px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+                <div style="padding:20px 32px; background:rgba(255,255,255,0.03); display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <span class="material-symbols-rounded" style="color:var(--success); font-size:32px;">photo_camera</span>
+                        <div>
+                            <h2 style="margin:0; font-size:1.25rem;">Live Snapshot : ${user}</h2>
+                            <p style="margin:0; font-size:0.85rem; color:var(--slate-400);">${server} (Session ${sid}) • Rafraîchissement 5s</p>
+                        </div>
+                    </div>
+                    <button onclick="closeLiveView()" style="background:none; border:none; color:white; cursor:pointer;"><span class="material-symbols-rounded">close</span></button>
+                </div>
+                <div style="padding:24px; display:flex; justify-content:center; background:#000; min-height:400px; position:relative;">
+                    <img id="live-snapshot-img" style="max-width:100%; max-height:70vh; object-fit:contain; border-radius:8px; display:none;">
+                    <div id="live-loader" style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center;">
+                        <div class="spinner" style="width:40px; height:40px; border:4px solid rgba(255,255,255,0.1); border-top-color:var(--success); border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 16px;"></div>
+                        <p style="color:var(--slate-400); font-weight:600;">Capture en cours...</p>
+                    </div>
+                </div>
+                <div style="padding:16px 32px; background:rgba(255,255,255,0.03); font-size:0.75rem; color:var(--slate-500); display:flex; justify-content:space-between;">
+                    <span>Note : Nécessite une session active sur l'écran principal.</span>
+                    <span id="snapshot-time">En attente...</span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const refreshSnapshot = async () => {
+            try {
+                const res = await fetch('/api/actions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'screenshot', sessionId: sid, user, server})
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    pollScreenshot(data.id || data.commandId);
+                }
+            } catch (e) {}
+        };
+
+        const pollScreenshot = async (cmdId) => {
+            let attempts = 0;
+            const subInterval = setInterval(async () => {
+                attempts++;
+                const r = await fetch(`/api/command-status/${cmdId}`);
+                const d = await r.json();
+                if (d.status === 'success' && d.result) {
+                    clearInterval(subInterval);
+                    const img = document.getElementById('live-snapshot-img');
+                    const loader = document.getElementById('live-loader');
+                    if (img) {
+                        img.src = d.result;
+                        img.style.display = 'block';
+                        loader.style.display = 'none';
+                        document.getElementById('snapshot-time').innerText = "Dernier snapshot: " + new Date().toLocaleTimeString();
+                    }
+                }
+                else if (d.status === 'error') {
+                    // L'agent a échoué (ex: "Isolation Session 0" -> SYSTEM ne peut pas capturer
+                    // une session RDP interactive ; ou "Action inconnue" sur agent ancien).
+                    // Surfacer l'erreur + STOPPER la boucle live (sinon refire toutes les 5s sur
+                    // un loader figé "Capture en cours..."). Portage QA 2026-06-22.
+                    clearInterval(subInterval);
+                    if (liveViewInterval) clearInterval(liveViewInterval);
+                    const loader = document.getElementById('live-loader');
+                    if (loader) {
+                        loader.innerHTML = '';
+                        const p = document.createElement('p');
+                        p.style.cssText = 'color:var(--error-on-dark); font-weight:600; max-width:560px; line-height:1.45; text-align:center;';
+                        p.textContent = "Capture impossible : " + (d.result || "erreur agent");
+                        loader.appendChild(p);
+                    }
+                    const stEl = document.getElementById('snapshot-time');
+                    if (stEl) stEl.innerText = "Échec";
+                    return;
+                }
+                if (attempts > 10) clearInterval(subInterval);
+            }, 1000);
+        };
+
+        refreshSnapshot();
+        liveViewInterval = setInterval(refreshSnapshot, 5000);
+    }
+
+    function closeLiveView() {
+        if (liveViewInterval) clearInterval(liveViewInterval);
+        const modal = document.getElementById('live-view-modal');
+        if (modal) modal.remove();
+    }
+
+    function toggleSelectAll(master) {
+        document.querySelectorAll('.session-cb').forEach(cb => cb.checked = master.checked);
+    }
+
+    function fillTemplate() {
+        const select = document.getElementById('message-template');
+        const input = document.getElementById('broadcast-msg-input');
+        if (select.value === 'custom') { input.value = ''; input.focus(); }
+        else if (select.value) { input.value = select.value; }
+    }
+
+    async function broadcastMessage(target) {
+        const msg = document.getElementById('broadcast-msg-input').value;
+        if (!msg) { showToast('Veuillez saisir un message', 'warning'); return; }
+        const targets = target === 'all' ? allSessions : filteredSessions;
+        if (targets.length === 0) { showToast('Aucune cible', 'warning'); return; }
+        if (!confirm(`Diffuser à ${targets.length} sessions ?`)) return;
+
+        let success = 0; let fail = 0;
+        for (const s of targets) {
+            try {
+                const res = await fetch('/api/actions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'message', sessionId: s.SessionId, user: s.UserName, server: s.HostServer, message: msg })
+                });
+                if (res.ok) success++; else fail++;
+            } catch (e) { fail++; }
+        }
+        showToast(`Diffusion terminée : ${success} succès`, fail === 0 ? 'success' : 'warning');
+    }
+
+    async function bulkAction(action) {
+        const selected = Array.from(document.querySelectorAll('.session-cb:checked')).map(cb => ({
+            id: cb.dataset.id, user: cb.dataset.user, server: cb.dataset.server
+        }));
+        if (selected.length === 0) { showToast('Aucune sélection', 'warning'); return; }
+        let message = '';
+        if (action === 'message') {
+            message = prompt(`Message pour les ${selected.length} sessions:`, "Veuillez fermer votre session.");
+            if (!message) return;
+        } else if (!confirm(`Confirmer ${action} pour les ${selected.length} sessions ?`)) return;
+
+        let success = 0; let fail = 0;
+        for (const s of selected) {
+            try {
+                const res = await fetch('/api/actions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: action === 'disconnect' ? 'disconnect' : (action === 'logoff' ? 'logoff' : 'message'), sessionId: s.id, user: s.user, server: s.server, message: message })
+                });
+                if (res.ok) success++; else fail++;
+            } catch (e) { fail++; }
+        }
+        showToast(`Action terminée : ${success} succès`, fail === 0 ? 'success' : 'warning');
+        setTimeout(refreshSessions, 1000);
+    }
+
+    window.onServerChange = (server) => { applyFilters(); };
+    bindLoadTooltips();
+    refreshSessions();
+    setInterval(refreshSessions, 15000);
+</script>
+{% endblock %}

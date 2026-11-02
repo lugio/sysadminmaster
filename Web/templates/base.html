@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SysAdminMaster | {% block title %}{% endblock %}</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <!-- Robust Font Stack: Fallback to system-ui if Google Fonts (Inter) is blocked -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='chart.js') }}"></script>
+    <script src="{{ url_for('static', filename='table-utils.js') }}" defer></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <script>
+        // Restauration immédiate de l'état de la sidebar
+        if (localStorage.getItem('sam_sidebar_mini') === 'true') {
+            document.body.classList.add('sidebar-mini');
+        }
+    </script>
+    <div id="toast-container"></div>
+    <div id="sidebar-overlay" onclick="toggleMobileMenu()"></div>
+    <script>
+        // Utilitaire de Logging Robuste pour DevTools
+        const SAM_Log = {
+            info: (msg, data = "") => console.log(`%c[SAM INFO]%c ${msg}`, "color: #3b82f6; font-weight: bold", "color: inherit", data),
+            warn: (msg, data = "") => console.warn(`%c[SAM WARN]%c ${msg}`, "color: #f59e0b; font-weight: bold", "color: inherit", data),
+            error: (msg, err = "") => console.error(`%c[SAM ERROR]%c ${msg}`, "color: #ef4444; font-weight: bold", "color: inherit", err)
+        };
+        
+        // Capture des erreurs globales
+        window.onerror = function(message, source, lineno, colno, error) {
+            SAM_Log.error(`Global Error: ${message}`, { source, lineno, colno, error });
+            return false;
+        };
+    </script>
+    <div class="sidebar">
+        <div class="brand">
+            <span class="brand-text">SysAdminMaster</span>
+            <button id="sidebar-toggle" onclick="toggleSidebar()" aria-label="Réduire/Développer la barre latérale">
+                <span class="material-symbols-rounded">menu_open</span>
+            </button>
+        </div>
+        <nav>
+            <div class="nav-group-label">Pilotage & Santé</div>
+            <a href="/" id="nav-dashboard" class="{% if active_page == 'dashboard' %}active{% endif %}" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">dashboard</span>
+                <span class="nav-text">Centre d'Opérations</span>
+            </a>
+            <a href="/resources" id="nav-resources" class="{% if active_page == 'resources' %}active{% endif %}" {% if active_page == 'resources' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">monitoring</span>
+                <span class="nav-text">Monitoring Santé</span>
+            </a>
+
+            <div class="nav-group-label">Support Utilisateurs</div>
+            <a href="/sessions" id="nav-sessions" class="{% if active_page == 'sessions' %}active{% endif %}" {% if active_page == 'sessions' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">groups</span>
+                <span class="nav-text">Sessions Actives</span>
+            </a>
+            <a href="/profiles" id="nav-profiles" class="{% if active_page == 'profiles' %}active{% endif %}" {% if active_page == 'profiles' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">account_circle</span>
+                <span class="nav-text">Espaces Profils</span>
+            </a>
+
+            <div class="nav-group-label">Gestion de Flotte</div>
+            <a href="/agents" id="nav-agents" class="{% if active_page == 'agents' %}active{% endif %}" {% if active_page == 'agents' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">memory</span>
+                <span class="nav-text">État du Parc RDS</span> 
+            </a>
+            <a href="/tools" id="nav-tools" class="{% if active_page == 'tools' %}active{% endif %}" {% if active_page == 'tools' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">construction</span>
+                <span class="nav-text">Actions Système</span>
+            </a>
+
+            <div class="nav-group-label">Maintenance & Audit</div>
+            <a href="/optimization" id="nav-optimization" class="nav-item-highlight {% if active_page == 'optimization' %}active{% endif %}" {% if active_page == 'optimization' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">bolt</span>
+                <span class="nav-text">Optimisation Broker</span>
+            </a>
+            <a href="/licenses" id="nav-licenses" class="{% if active_page == 'licenses' %}active{% endif %}" {% if active_page == 'licenses' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">key</span>
+                <span class="nav-text">Licences O365</span>
+            </a>
+            <a href="/alerts" id="nav-alerts" class="{% if active_page == 'alerts' %}active{% endif %}" {% if active_page == 'alerts' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">notifications_active</span>
+                <span class="nav-text">Alertes & Envois</span>
+            </a>
+            <a href="/reports" id="nav-reports" class="{% if active_page == 'reports' %}active{% endif %}" {% if active_page == 'reports' %}aria-current="page"{% endif %}>
+                <span class="material-symbols-rounded">analytics</span>
+                <span class="nav-text">Rapports & Audit</span>
+            </a>
+            
+            <div class="sidebar-footer">
+                <a href="/diagnostics" target="_blank" class="diagnostic-link">
+                    <span class="material-symbols-rounded">health_and_safety</span>
+                    <span class="nav-text">Diagnostic RDS</span>
+                </a>
+                <a href="/styleguide" class="diagnostic-link {% if active_page == 'styleguide' %}active{% endif %}" {% if active_page == 'styleguide' %}aria-current="page"{% endif %}>
+                    <span class="material-symbols-rounded">palette</span>
+                    <span class="nav-text">Design System</span>
+                </a>
+                <div class="version-info">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="dot dot-green" style="width:6px; height:6px;"></span>
+                        <span>v{{ app_version }} Enterprise</span>
+                    </div>
+                    <span>RDS Excellence Platform</span>
+                </div>
+            </div>
+        </nav>
+    </div>
+
+    <div class="main">
+        <header>
+            <div style="display: flex; align-items: center;">
+                <button id="mobile-toggle" onclick="toggleMobileMenu()" aria-label="Menu mobile">
+                    <span class="material-symbols-rounded">menu</span>
+                </button>
+                <h1 id="page-title">{% block page_title %}{% endblock %}</h1>
+            </div>
+            
+            <div id="global-selector-container" style="flex: 1; display: flex; justify-content: center; align-items: center; margin: 0 40px;">
+                <div class="global-selector-wrapper">
+                    <select id="global-server-filter" onchange="onGlobalServerChange()" class="global-selector-select" aria-label="Sélectionner le serveur RDS">
+                        <option value="All">Résumé de la Ferme (Tous)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="header-stats">
+                <div class="header-data-point success" title="État de la Ferme">
+                    <span class="material-symbols-rounded">verified_user</span>
+                </div>
+                <div class="header-data-point primary" title="Sessions Actives">
+                    <span class="material-symbols-rounded">groups</span>
+                    <span id="header-session-count">--</span>
+                </div>
+                <div class="header-data-point warning" title="Alertes Actives">
+                    <span class="material-symbols-rounded">notifications_active</span>
+                    <span id="header-alerts-count">--</span>
+                </div>
+                <div class="header-data-point tertiary" title="État du Parc">
+                    <span class="material-symbols-rounded">dns</span>
+                    <span id="header-servers-count">-- / --</span>
+                </div>
+            </div>
+        </header>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            const isMini = document.body.classList.toggle('sidebar-mini');
+            localStorage.setItem('sam_sidebar_mini', isMini);
+        }
+
+        function toggleMobileMenu() {
+            document.querySelector('.sidebar').classList.toggle('active');
+            document.getElementById('sidebar-overlay').classList.toggle('active');
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            
+            let icon = 'info';
+            if (type === 'success') icon = 'check_circle';
+            if (type === 'error') icon = 'error';
+            if (type === 'warning') icon = 'warning';
+
+            toast.innerHTML = `
+                <span class="material-symbols-outlined">${icon}</span>
+                <div class="toast-content">${message}</div>
+            `;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        }
+
+        function showComingSoon(feature) {
+            showToast(`${feature} : Cette fonctionnalité est en cours de développement.`, 'warning');
+        }
+
+        async function populateServerSelector(retries = 2) {
+            try {
+                const res = await fetch('/api/servers');
+                const servers = await res.json();
+                const select = document.getElementById('global-server-filter');
+                if (!select) return;
+
+                const current = localStorage.getItem('sam_last_server') || 'All';
+                select.innerHTML = '<option value="All">Ferme (Tous)</option><option value="Broker">Broker Local</option>';
+
+                if (Array.isArray(servers)) {
+                    servers.forEach(srv => {
+                        // Support legacy string list and new enriched object list
+                        const name = typeof srv === 'string' ? srv : srv.name;
+                        const shortName = typeof srv === 'string' ? srv.split('.')[0].toUpperCase() : srv.shortName;
+                        select.innerHTML += `<option value="${name}">${shortName}</option>`;
+                    });
+                }
+
+                select.value = current;
+                updateGlobalStats(); // Initial update
+            } catch (e) {
+                if (retries > 0) {
+                    setTimeout(() => populateServerSelector(retries - 1), 1000);
+                } else {
+                    SAM_Log.error("populateServerSelector: abandon après retries", e);
+                }
+            }
+        }
+
+        async function updateGlobalStats() {
+            try {
+                const selectedServer = document.getElementById('global-server-filter').value;
+                
+                // Update Session Count (Filtré si serveur spécifique)
+                fetch('/api/sessions').then(r => r.json()).then(data => {
+                    const el = document.getElementById('header-session-count');
+                    if (el) {
+                        let filtered = data;
+                        if (selectedServer !== 'All') {
+                            const short = selectedServer.split('.')[0].toUpperCase();
+                            filtered = data.filter(s => {
+                                const host = (s.HostServer || "").toUpperCase().split('.')[0];
+                                if (short === 'BROKER') return host.includes('BROKER');
+                                return host === short;
+                            });
+                        }
+                        el.innerText = filtered.length;
+                    }
+                });
+
+                // Update Server Count
+                fetch('/api/servers').then(r => r.json()).then(servers => {
+                    const el = document.getElementById('header-servers-count');
+                    if (el) {
+                        if (selectedServer === 'All') {
+                            el.innerText = `${servers.length} / ${servers.length}`;
+                        } else {
+                            el.innerText = "1 / " + servers.length;
+                        }
+                    } 
+                });
+
+                // Alertes (Basé sur le serveur sélectionné si possible)
+                const metricsRes = await fetch(`/api/metrics?server=${selectedServer}`);
+                const metrics = await metricsRes.json();
+                if (metrics) {
+                    const cpu = metrics.CPU || 0;
+                    const alertsCount = cpu > 90 ? 1 : 0;
+                    const el = document.getElementById('header-alerts-count');
+                    if (el) {
+                        el.innerText = alertsCount;
+                        el.style.color = alertsCount > 0 ? "var(--error)" : "var(--success)";
+                    }
+                }
+            } catch (e) {}
+        }
+
+        setInterval(updateGlobalStats, 15000);
+        populateServerSelector();
+
+        function onGlobalServerChange() {
+            const server = document.getElementById('global-server-filter').value;
+            localStorage.setItem('sam_last_server', server);
+            
+            // Mise à jour immédiate des stats globales du header
+            updateGlobalStats();
+            
+            if (window.onServerChange) window.onServerChange(server);
+            else location.reload();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedServer = localStorage.getItem('sam_last_server');
+            if (savedServer) {
+                const select = document.getElementById('global-server-filter');
+                if (select) {
+                    // Populate servers first or wait?
+                    // We'll handled server list population in common script or page specific
+                }
+            }
+        });
+
+        // ============================================================
+        // ADMINIT TASKBAR & CONSOLE LOGIC (SocketIO Stream v2.7.6)
+        // ============================================================
+        let socket = null;
+
+        function toggleConsole() {
+            const consoleEl = document.getElementById('rollup-console');
+            const btn = document.getElementById('taskbar-log-btn');
+            const isExpanded = consoleEl.classList.toggle('expanded');
+            btn.classList.toggle('active', isExpanded);
+            localStorage.setItem('sam_console_expanded', isExpanded);
+            
+            if (isExpanded) {
+                initSocket();
+                setTimeout(() => {
+                    const content = document.getElementById('console-content');
+                    content.scrollTop = content.scrollHeight;
+                }, 310);
+            }
+        }
+
+        function initSocket() {
+            if (socket) return;
+            if (typeof io === 'undefined') {
+                SAM_Log.warn("Socket.IO client non chargé (CDN inaccessible ?). Console temps réel désactivée.");
+                return;
+            }
+
+            socket = io('/logs');
+            SAM_Log.info("WebSocket connectant au namespace /logs...");
+
+            socket.on('new_log', (data) => {
+                appendLogLine(data.line);
+            });
+
+            // Charge les logs initiaux
+            updateLogsInitial();
+        }
+
+        function appendLogLine(line) {
+            const content = document.getElementById('console-content');
+            const lineEl = document.createElement('div');
+            lineEl.className = 'console-line';
+            
+            const [time, name, level, ...msgParts] = line.split(' - ');
+            if (time && level) {
+                const lvl = level.toLowerCase();
+                lineEl.classList.add(`level-${lvl}`);
+                lineEl.innerHTML = `
+                    <span class="line-time">${time}</span>
+                    <span class="line-level">[${level.toUpperCase()}]</span>
+                    <span class="line-msg">${msgParts.join(' - ')}</span>
+                `;
+            } else {
+                lineEl.innerText = line;
+            }
+            
+            content.appendChild(lineEl);
+            if (content.scrollHeight - content.scrollTop < 600) {
+                content.scrollTop = content.scrollHeight;
+            }
+            
+            // Limit lines
+            while (content.childNodes.length > 500) {
+                content.removeChild(content.firstChild);
+            }
+        }
+
+        async function updateLogsInitial() {
+            try {
+                const res = await fetch('/api/logs');
+                const data = await res.json();
+                const content = document.getElementById('console-content');
+                content.innerHTML = '';
+                if (data.content) {
+                    data.content.forEach(line => appendLogLine(line));
+                }
+            } catch (e) {
+                SAM_Log.error("Initial logs fetch failed", e);
+            }
+        }
+
+        function clearConsole() {
+            document.getElementById('console-content').innerHTML = '<div class="console-line info">Console nettoyée. En attente de nouveaux logs...</div>';
+            document.getElementById('console-filter').value = '';
+        }
+
+        function filterLogs(query) {
+            const lines = document.querySelectorAll('.console-line');
+            lines.forEach(line => {
+                if (line.innerText.toLowerCase().includes(query.toLowerCase())) {
+                    line.style.display = 'block';
+                } else {
+                    line.style.display = 'none';
+                }
+            });
+        }
+
+        // Initialize Console State
+        document.addEventListener('DOMContentLoaded', () => {
+            if (localStorage.getItem('sam_console_expanded') === 'true') {
+                toggleConsole();
+            }
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+
+    <!-- AdminIT Taskbar -->
+    <div id="rollup-console" class="rollup-console">
+        <div class="console-header">
+            <span>CONSOLE D'EXÉCUTION SYSTEME</span>
+            <div class="console-controls" style="display:flex; align-items:center; gap:12px;">
+                <div class="console-search-wrapper" style="position:relative; display:flex; align-items:center;">
+                    <span class="material-symbols-rounded" style="position:absolute; left:8px; font-size:16px; color:var(--slate-400);">search</span>
+                    <input type="text" id="console-filter" placeholder="Filtrer les logs..." oninput="filterLogs(this.value)" 
+                           style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:#fff; padding:4px 8px 4px 28px; font-size:11px; outline:none; width:150px;">
+                </div>
+                <div class="console-btn" onclick="clearConsole()" title="Effacer la console">
+                    <span class="material-symbols-rounded" style="font-size:16px">delete_sweep</span>
+                    Vider
+                </div>
+                <div class="console-btn" onclick="toggleConsole()" title="Fermer">
+                    <span class="material-symbols-rounded" style="font-size:16px">close</span>
+                </div>
+            </div>
+        </div>
+        <div id="console-content" class="console-content">
+            <div class="console-line info">Initialisation de la console AdminIT...</div>
+        </div>
+    </div>
+
+    <footer class="adminit-taskbar">
+        <div class="taskbar-launcher">
+            <div class="taskbar-item" onclick="showComingSoon('Launcher')" title="Lanceur d'applications">
+                <span class="material-symbols-rounded">widgets</span>
+                <span>Actions</span>
+            </div>
+            <div style="width: 1px; height: 24px; background: var(--slate-200); margin: 0 10px;"></div>
+            <div class="taskbar-item" onclick="location.href='/tools'" title="Console interactive (page Outils)">
+                <span class="material-symbols-rounded">terminal</span>
+                <span>Terminal</span>
+            </div>
+            <div id="taskbar-log-btn" class="taskbar-item" onclick="toggleConsole()" title="Console de logs temps réel">
+                <span class="material-symbols-rounded">list_alt</span>
+                <span>Logs</span>
+            </div>
+        </div>
+        
+        <div class="taskbar-status">
+            <div class="status-indicator">
+                <div id="task-pulse" class="pulse-dot"></div>
+                <span id="task-status-text">Système Prêt</span>
+            </div>
+            <div style="width: 1px; height: 24px; background: var(--slate-200);"></div>
+            <div class="status-indicator" style="color: var(--slate-400); font-family: 'JetBrains Mono';">
+                <span id="taskbar-clock">00:00:00</span>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        async function updateTaskStatus() {
+            try {
+                const res = await fetch('/api/tasks/active');
+                const data = await res.json();
+                const dot = document.getElementById('task-pulse');
+                const text = document.getElementById('task-status-text');
+                
+                if (data.count > 0) {
+                    dot.classList.add('busy');
+                    text.innerText = `${data.count} Action(s) en cours`;
+                    text.style.color = 'var(--accent-primary)';
+                } else {
+                    dot.classList.remove('busy');
+                    text.innerText = 'Système Prêt';
+                    text.style.color = 'var(--slate-500)';
+                }
+            } catch (e) {}
+        }
+
+        setInterval(updateTaskStatus, 5000);
+        updateTaskStatus(); // Initial call
+
+        function updateClock() {
+            const now = new Date();
+            const timeStr = now.getHours().toString().padStart(2, '0') + ':' + 
+                          now.getMinutes().toString().padStart(2, '0') + ':' + 
+                          now.getSeconds().toString().padStart(2, '0');
+            document.getElementById('taskbar-clock').innerText = timeStr;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
+</body>
+</html>
