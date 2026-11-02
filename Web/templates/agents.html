@@ -1,0 +1,745 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header %}
+
+{% block title %}Flotte d'Agents{% endblock %}
+{% block page_title %}Centre de Gestion des Agents RDS{% endblock %}
+
+{% block content %}
+<div class="content-section fade-in">
+    <!-- PANNEAU AGENTMASTER -->
+    <div id="master-status-panel" class="card" style="margin-bottom:20px;">
+        <div class="row justify-between flex-wrap gap-3">
+            <div class="row gap-3">
+                <span class="material-symbols-rounded text-muted" style="font-size:28px;" id="master-icon">hub</span>
+                <div>
+                    <div class="font-black" style="font-size:0.95rem;">AgentMaster <span class="text-muted" style="font-weight:400; font-size:0.75rem;">— Service broker {{ broker_host }}:5000</span></div>
+                    <div class="mono text-subtle" style="font-size:0.75rem;" id="master-url">Verification...</div>
+                </div>
+            </div>
+            <div class="row flex-wrap" style="gap:20px;">
+                <div class="text-center">
+                    <div class="font-black" style="font-size:1.4rem;" id="master-agents-online">-</div>
+                    <div class="text-muted uppercase" style="font-size:0.65rem;">Agents en ligne</div>
+                </div>
+                <div class="text-center">
+                    <div class="font-black" style="font-size:1.4rem;" id="master-agents-total">-</div>
+                    <div class="text-muted uppercase" style="font-size:0.65rem;">Agents total</div>
+                </div>
+                <div class="text-center">
+                    <div class="font-black" style="font-size:1.4rem;" id="master-latency">-</div>
+                    <div class="text-muted uppercase" style="font-size:0.65rem;">Latence (ms)</div>
+                </div>
+                <span class="badge" id="master-badge" style="font-size:0.7rem;">VERIFICATION...</span>
+                <div class="row flex-wrap gap-2">
+                    <button class="btn-action btn-sm" onclick="masterAction('diagnose')" title="Verifier le process et la tache planifiee sur {{ broker_host }}">
+                        <span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">health_and_safety</span> DIAGNOSTIC
+                    </button>
+                    <button class="btn-premium btn-sm" onclick="masterAction('install')" title="Deployer master.py sur {{ broker_host }} via WinRM">
+                        <span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">cloud_upload</span> DEPLOYER
+                    </button>
+                    <a href="/api/admin/master-script" download="Deploy-AgentMaster.ps1">
+                        <button class="btn-action btn-sm text-accent" title="Telecharger le script a executer manuellement sur {{ broker_host }}">
+                            <span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">download</span> SCRIPT
+                        </button>
+                    </a>
+                    <button class="btn-action btn-sm text-warning" onclick="masterAction('stop')" title="Arreter le service AgentMaster sur {{ broker_host }}">
+                        <span class="material-symbols-rounded" style="font-size:14px; vertical-align:middle;">stop_circle</span> ARRETER
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- Console de sortie AgentMaster -->
+        <div id="master-console-wrap" style="display:none; margin-top:14px;">
+            <div class="row justify-between" style="margin-bottom:6px;">
+                <span class="text-muted uppercase font-bold" style="font-size:0.65rem;">Sortie de la commande</span>
+                <span class="material-symbols-rounded text-muted" style="font-size:14px; cursor:pointer;" onclick="document.getElementById('master-console-wrap').style.display='none'">close</span>
+            </div>
+            <pre id="master-console" class="console-box" style="margin:0; max-height:220px;"></pre>
+        </div>
+    </div>
+
+    <!-- Navigation par Onglets -->
+    <div class="tab-container" role="tablist">
+        <button class="tab-btn active" onclick="showTab('telemetry')" id="tab-btn-telemetry" role="tab" aria-selected="true" aria-controls="tab-telemetry">
+            <span class="material-symbols-rounded">analytics</span> TÉLÉMÉTRIE TEMPS RÉEL
+        </button>
+        <button class="tab-btn" onclick="showTab('deployment')" id="tab-btn-deployment" role="tab" aria-selected="false" aria-controls="tab-deployment">
+            <span class="material-symbols-rounded">cloud_download</span> DÉPLOIEMENT & MAJ
+        </button>
+    </div>
+
+    <!-- ONGLET 1: TÉLÉMÉTRIE -->
+    <div id="tab-telemetry" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-telemetry">
+        <div class="metrics-container" style="margin-bottom:24px;">
+            <div class="card">
+                {{ card_header('speed', 'Charge CPU (%)', 'text-accent') }}
+                <div style="height: 180px;"><canvas id="agents-cpu-chart"></canvas></div>
+            </div>
+            <div class="card">
+                {{ card_header('memory', 'Utilisation RAM (%)', 'text-accent') }}
+                <div style="height: 180px;"><canvas id="agents-ram-chart"></canvas></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="row justify-between" style="margin-bottom:20px;">
+                <h3 style="margin:0;">Agents Connectés</h3>
+                <div class="row gap-4">
+                    <span id="agents-summary" class="text-subtle font-bold" style="font-size:0.85rem;">Chargement...</span>
+                    <button class="btn-premium" onclick="updateAgents()" aria-label="Actualiser la liste des agents">
+                        <span class="material-symbols-rounded">refresh</span> ACTUALISER
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-toolbar">
+                <input type="text" class="form-control" placeholder="Filtrer les agents..." data-filter-for="agents-table">
+            </div>
+            <div class="table-scroll">
+                <table id="agents-table" data-enhance>
+                    <thead>
+                        <tr>
+                            <th class="text-center" data-no-sort style="width:50px;">STATUT</th>
+                            <th data-sort="text">SERVEUR</th>
+                            <th class="text-center" data-sort="num">CPU</th>
+                            <th class="text-center" data-sort="num">RAM</th>
+                            <th class="text-center" data-sort="num">SESSIONS</th>
+                            <th class="text-center" data-sort="num">LATENCE</th>
+                            <th class="text-center" data-sort="text">VERSION</th>
+                            <th data-no-sort>TOP PROCESSUS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agents-body">
+                        <tr><td colspan="8" class="text-center text-muted" style="padding:40px;">Recherche des agents...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ONGLET 2: DÉPLOIEMENT -->
+    <div id="tab-deployment" class="tab-content" style="display:none;">
+        <div class="dashboard-grid">
+            <div class="card">
+                {{ card_header('dns', 'Inventaire des Serveurs', 'text-accent') }}
+                <p class="text-subtle" style="font-size: 0.85rem; margin-bottom: 20px;">Gérez l'installation et la maintenance des agents sur vos hôtes de session RDS.</p>
+
+                <div class="table-toolbar">
+                    <input type="text" class="form-control" placeholder="Filtrer les serveurs..." data-filter-for="deployment-table">
+                </div>
+                <div class="table-scroll">
+                    <table id="deployment-table" data-enhance>
+                        <thead>
+                            <tr>
+                                <th class="text-center" data-no-sort style="width:40px;"><input type="checkbox" id="select-all-agents" onchange="toggleAllAgents(this.checked)"></th>
+                                <th data-sort="text">NOM DU SERVEUR</th>
+                                <th class="text-center" data-sort="text">VERSION</th>
+                                <th class="text-center" data-sort="text">ÉTAT AGENT</th>
+                                <th class="text-right" data-no-sort>ACTIONS DE MAINTENANCE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deployment-body">
+                            <!-- Rempli par JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="bulk-action-bar" class="row gap-4" style="display:none; margin-top:15px; padding:15px; background:var(--slate-50); border:1px dashed var(--accent-primary); border-radius:8px;">
+                    <span id="selected-count" class="font-bold text-accent">0 serveurs sélectionnés</span>
+                    <button class="btn-premium btn-sm" onclick="bulkMaintenance('install')">METTRE À JOUR</button>
+                    <button class="btn-action btn-sm" onclick="bulkMaintenance('diagnose')">DIAGNOSTIC</button>
+                    <button class="btn-action btn-sm text-error" onclick="bulkMaintenance('uninstall')">SUPPRIMER</button>
+                </div>
+            </div>
+
+            <div class="card">
+                {{ card_header('warning', 'Actions de Masse', 'text-warning') }}
+                <div class="stack gap-3">
+                    <button class="btn-premium" style="width:100%;" onclick="bulkAction('install-all')">
+                        <span class="material-symbols-rounded">upgrade</span> METTRE À JOUR TOUTE LA FLOTTE
+                    </button>
+                    <button class="btn-action" style="width:100%;" onclick="bulkAction('diagnose-all')">
+                        <span class="material-symbols-rounded">health_and_safety</span> DIAGNOSTIC COMPLET
+                    </button>
+                    <button class="btn-action" style="width:100%;" onclick="bulkAction('restart-all')">
+                        <span class="material-symbols-rounded">restart_alt</span> REDÉMARRER TOUS LES AGENTS
+                    </button>
+                </div>
+
+                <!-- Console de Maintenance Intégrée (Toujours présente pour combler le vide) -->
+                <div id="maintenance-console-container" style="margin-top:24px;">
+                    <div class="row justify-between" style="margin-bottom:8px;">
+                        <span class="text-muted uppercase font-bold" style="font-size:0.7rem;">Console d'exécution</span>
+                        <div class="row gap-2">
+                            <span class="material-symbols-rounded text-subtle" style="font-size:16px; cursor:pointer;" onclick="if(window.toggleConsole) window.toggleConsole()" title="Ouvrir la console système">open_in_new</span>
+                            <span class="material-symbols-rounded text-success" style="font-size:16px; cursor:pointer;" onclick="document.getElementById('maintenance-console').innerHTML='<div>&gt; Console nettoyée.</div>'" title="Vider">mop</span>
+                        </div>
+                    </div>
+                    <div id="maintenance-console" class="console-box" style="height:280px;">
+                        <div>&gt; Prêt pour les opérations de maintenance. Les logs complets sont redirigés vers la console système (Bas de page).</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+    .active-tab { background: var(--accent-primary) !important; color: white !important; }
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+    .status-online { background: var(--success); }
+    .status-stale { background: var(--warning); }
+    .status-offline { background: var(--slate-300); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const BROKER = {{ broker_host | tojson }};
+    let cpuChart, ramChart;
+    let agentsHistory = {};
+    const chartColors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899'];
+
+    // Initialisation
+    document.addEventListener('DOMContentLoaded', () => {
+        initCharts();
+        loadHistory();          // historique réel AVANT le temps réel
+        updateMasterStatus();
+        updateAgents();
+        setInterval(updateMasterStatus, 15000);
+        setInterval(updateAgents, 10000);
+    });
+
+    async function masterAction(action) {
+        const labels = { install: 'DEPLOYER', diagnose: 'DIAGNOSTIC', stop: 'ARRETER' };
+        const confirmMsg = {
+            install: 'Deployer AgentMaster sur ' + BROKER + ' via WinRM ?\n(master.py + tache planifiee SYSTEM port 5000)',
+            diagnose: 'Lancer un diagnostic sur ' + BROKER + ' ?',
+            stop: 'Arreter le service AgentMaster sur ' + BROKER + ' ?'
+        };
+        if (!confirm(confirmMsg[action])) return;
+
+        const wrap = document.getElementById('master-console-wrap');
+        const cons = document.getElementById('master-console');
+        wrap.style.display = 'block';
+        cons.textContent = `> Execution de l'action "${action}" sur ${BROKER}...\n`;
+
+        // Bloquer les boutons pendant l'operation
+        document.querySelectorAll('#master-status-panel button').forEach(b => b.disabled = true);
+
+        try {
+            const res = await fetch('/api/admin/master-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            const data = await res.json();
+            cons.textContent += data.output || '(pas de sortie)';
+            cons.scrollTop = cons.scrollHeight;
+
+            if (data.success) {
+                cons.style.color = 'var(--console-fg-ok)';
+                setTimeout(updateMasterStatus, 2000);
+            } else {
+                cons.style.color = 'var(--console-fg-err)';
+            }
+        } catch (e) {
+            cons.textContent += `\nERREUR RESEAU: ${e.message}`;
+            cons.style.color = 'var(--console-fg-err)';
+        } finally {
+            document.querySelectorAll('#master-status-panel button').forEach(b => b.disabled = false);
+        }
+    }
+
+    async function updateMasterStatus() {
+        const icon = document.getElementById('master-icon');
+        const urlEl = document.getElementById('master-url');
+        const onlineEl = document.getElementById('master-agents-online');
+        const totalEl = document.getElementById('master-agents-total');
+        const latencyEl = document.getElementById('master-latency');
+        const badge = document.getElementById('master-badge');
+
+        try {
+            const res = await fetch('/api/master-status');
+            const data = await res.json();
+
+            urlEl.innerText = data.url || 'N/A';
+
+            if (data.reachable) {
+                icon.style.color = 'var(--success)';
+                badge.className = 'badge badge-success';
+                badge.innerText = 'CONNECTE';
+                onlineEl.innerText = data.agents_online ?? '-';
+                totalEl.innerText = data.agents_total ?? '-';
+                latencyEl.innerText = data.latency_ms ?? '-';
+                latencyEl.style.color = (data.latency_ms > 500) ? 'var(--warning)' : 'var(--success)';
+            } else {
+                icon.style.color = 'var(--error)';
+                badge.className = 'badge badge-error';
+                badge.innerText = 'INJOIGNABLE';
+                onlineEl.innerText = '-';
+                totalEl.innerText = '-';
+                latencyEl.innerText = data.latency_ms ?? '-';
+                latencyEl.style.color = 'var(--error)';
+            }
+        } catch (e) {
+            icon.style.color = 'var(--error)';
+            badge.className = 'badge badge-error';
+            badge.innerText = 'ERREUR DASHBOARD';
+            console.error('Master status error:', e);
+        }
+    }
+
+    function onServerChange() {
+        updateAgents();
+    }
+    window.onServerChange = onServerChange;
+
+    function showTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+        document.querySelectorAll('.tab-btn').forEach(b => {
+            b.classList.remove('active');
+            b.setAttribute('aria-selected', 'false');
+        });
+        
+        document.getElementById('tab-' + tabId).style.display = 'block';
+        const activeBtn = document.getElementById('tab-btn-' + tabId);
+        activeBtn.classList.add('active');
+        activeBtn.setAttribute('aria-selected', 'true');
+    }
+
+    function initCharts() {
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 400 },
+            scales: { 
+                y: { min: 0, max: 100, grid: { color: 'rgba(0,0,0,0.05)' } },
+                x: { display: false }
+            },
+            plugins: { legend: { display: false } }
+        };
+
+        const cpuCtx = document.getElementById('agents-cpu-chart');
+        const ramCtx = document.getElementById('agents-ram-chart');
+        if (!cpuCtx || !ramCtx) return;
+
+        cpuChart = new Chart(cpuCtx, {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: commonOptions
+        });
+
+        ramChart = new Chart(ramCtx, {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: commonOptions
+        });
+    }
+
+    const MAX_POINTS = 120;   // 2 h à 1 point/minute (échantillonnage du master)
+
+    /** Historique RÉEL depuis le master (table metrics_history).
+     *  Sans lui, les courbes ne montraient que ce que la page avait accumulé
+     *  depuis son ouverture — soit rien pendant les 3 premières minutes, et tout
+     *  était reperdu à chaque rechargement. */
+    async function loadHistory() {
+        try {
+            const r = await fetch('/api/agent/history?minutes=120');
+            const d = await r.json();
+            const hosts = d.hosts || {};
+            let idx = 0;
+            for (const [host, points] of Object.entries(hosts)) {
+                agentsHistory[host] = {
+                    cpu: points.map(p => p.cpu),
+                    ram: points.map(p => p.ram),
+                    color: chartColors[idx++ % chartColors.length],
+                };
+            }
+            updateChartsData();
+        } catch (e) {
+            console.warn('Historique indisponible, les courbes partiront du temps réel', e);
+        }
+    }
+
+    async function updateAgents() {
+        try {
+            const selectedServer = document.getElementById('global-server-filter').value;
+            const res = await fetch('/api/agent/status');
+            const data = await res.json();
+            
+            const badge = document.getElementById('agents-badge');
+            if (badge) badge.innerText = data.online;
+
+            const summaryEl = document.getElementById('agents-summary');
+            if (summaryEl) summaryEl.innerText = `${data.online} En Ligne / ${data.total} Total`;
+            
+            const tbody = document.getElementById('agents-body');
+            const deployBody = document.getElementById('deployment-body');
+            if (!tbody || !deployBody) return;
+            
+            document.getElementById('agents-body').innerHTML = '';
+            document.getElementById('deployment-body').innerHTML = '';
+            
+            if (!data || !data.agents) {
+                console.warn("Aucune donnée agent reçue du broker");
+                return;
+            }
+
+            const latestVersion = data.latest_version || 'N/A';
+
+            data.agents.forEach((agent, idx) => {
+                // ⚠️ Le sélecteur global porte des FQDN (RDSH01.contoso.local) alors
+                // que agent.hostname est court (RDSH01) : comparer sans raccourcir LES
+                // DEUX côtés rendait la table vide dès qu'un serveur était sélectionné
+                // (constaté 27/08). Même normalisation que sessions.html.
+                const shortSel = selectedServer.split('.')[0].toUpperCase();
+                const hostShort = agent.hostname.split('.')[0].toUpperCase();
+                const srvMatch = selectedServer === 'All' ||
+                                 hostShort === shortSel ||
+                                 (shortSel === 'BROKER' && hostShort.includes('BROKER'));
+
+                if (!srvMatch) return;
+
+                // Table Télémétrie
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="text-center"><span class="status-dot status-${agent.status}"></span></td>
+                    <td>
+                        <div class="font-black text-strong">${agent.display_name || agent.hostname}</div>
+                        <div class="text-muted" style="font-size:0.65rem;">${agent.hostname}</div>
+                    </td>
+                    <td class="text-center">
+                        <div class="font-bold ${agent.cpu > 80 ? 'text-error' : 'text-subtle'}">${agent.cpu}%</div>
+                        <div class="progress-container" style="width:60px; margin:4px auto;"><div class="progress-bar" style="width:${agent.cpu}%"></div></div>
+                    </td>
+                    <td class="text-center">
+                        <div class="font-bold">${agent.ram}%</div>
+                        <div class="progress-container" style="width:60px; margin:4px auto;"><div class="progress-bar" style="width:${agent.ram}%; background:var(--warning)"></div></div>
+                    </td>
+                    <td class="text-center font-bold">${agent.sessions.Total || 0}</td>
+                    <td class="text-center text-subtle" style="font-size:0.75rem;">${agent.age_seconds}s</td>
+                    <td class="text-center"><span class="badge" style="background:var(--slate-100); color:var(--slate-600);">${agent.agent_version || 'N/A'}</span></td>
+                    <td>
+                        <div class="row flex-wrap gap-1">
+                            ${(agent.processes_top5 || []).slice(0,2).map(p => `
+                                <span class="badge" style="font-size:0.6rem; text-transform:none; padding:2px 6px;">${p.Name}</span>
+                            `).join('')}
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+
+                // Table Déploiement
+                const dRow = document.createElement('tr');
+                const isLegacy = agent.agent_version && agent.agent_version !== 'N/A' && agent.agent_version !== latestVersion;
+                dRow.innerHTML = `
+                    <td class="text-center"><input type="checkbox" class="agent-checkbox" value="${agent.hostname}" onchange="updateSelectedCount()"></td>
+                    <td>
+                        <div class="font-bold">${agent.display_name || agent.hostname}</div>
+                    </td>
+                    <td class="text-center">
+                        <span class="badge font-bold" style="background:var(--slate-100); color:var(--slate-800);">
+                            ${agent.agent_version || 'N/A'}
+                            ${isLegacy ? '<span class="text-error" style="margin-left:5px;">↑</span>' : ''}
+                        </span>
+                    </td>
+                    <td class="text-center">
+                        <span class="badge ${agent.status === 'online' ? 'badge-success' : 'badge-error'}">
+                            ${agent.status === 'online' ? 'ACTIF' : 'HORS LIGNE'}
+                        </span>
+                    </td>
+                    <td class="text-right">
+                        <div class="row justify-end flex-wrap gap-2">
+                            <button class="btn-action btn-sm" onclick="runAction('diagnose', '${agent.hostname}')">DIAGNOSTIC</button>
+                            ${agent.status === 'online' ? `
+                            <button class="btn-premium btn-sm ${isLegacy ? 'btn-error' : ''}" onclick="runAction('install', '${agent.hostname}')">
+                                ${isLegacy ? 'METTRE À JOUR' : 'RE-DÉPLOYER'}
+                            </button>
+                            ${isLegacy ? `<a href="/api/admin/bootstrap-script/${agent.hostname}" download="Bootstrap-${agent.hostname}.ps1" title="Script bootstrap à exécuter manuellement (fallback si GPO non configurée)"><button class="btn-action btn-sm text-accent"><span class="material-symbols-rounded" style="font-size:13px; vertical-align:middle;">download</span> SCRIPT</button></a>` : ''}
+                            ` : `
+                            <a href="/api/admin/bootstrap-script/${agent.hostname}" download="Bootstrap-${agent.hostname}.ps1" title="Voie fiable : télécharger et exécuter ce script en RDP sur l'hôte (droits admin locaux). C'est la méthode la plus fiable quand WinRM est refusé."><button class="btn-premium btn-sm"><span class="material-symbols-rounded" style="font-size:13px; vertical-align:middle;">download</span> SCRIPT (RDP manuel)</button></a>
+                            <button class="btn-action btn-sm" onclick="runAction('install', '${agent.hostname}')" title="Tentative automatique via WinRM depuis ${BROKER} — échoue tant que ${BROKER}$ n'est pas admin local sur cet hôte (GPO absente ou GPP non fiable). Peut prendre jusqu'à 90s.">TENTER AUTO (WinRM)</button>
+                            `}
+                            <button class="btn-action btn-sm text-error" onclick="runAction('uninstall', '${agent.hostname}')">SUPPRIMER</button>
+                        </div>
+                    </td>
+                `;
+                deployBody.appendChild(dRow);
+
+                // Charts History
+                if (agent.status === 'online') {
+                    // ⚠️ NE PAS pré-remplir de zéros : l'ancienne version initialisait
+                    // 20 points à 0, donc le graphe affirmait « 0 % sur les 200 dernières
+                    // secondes » alors qu'on n'avait aucune donnée. On n'ajoute que du réel ;
+                    // l'historique de fond vient de /api/agent/history (cf. loadHistory).
+                    if (!agentsHistory[agent.hostname]) {
+                        agentsHistory[agent.hostname] = { cpu: [], ram: [], color: chartColors[idx % chartColors.length] };
+                    }
+                    const h = agentsHistory[agent.hostname];
+                    h.cpu.push(agent.cpu);
+                    h.ram.push(agent.ram);
+                    if (h.cpu.length > MAX_POINTS) { h.cpu.shift(); h.ram.shift(); }
+                }
+            });
+
+            updateChartsData();
+            updateSelectedCount();
+
+            // Synchro header
+            if (window.updateGlobalStats) window.updateGlobalStats();
+        } catch (e) {
+            console.error("Update error:", e);
+        }
+    }
+
+    function toggleAllAgents(checked) {
+        document.querySelectorAll('.agent-checkbox').forEach(cb => cb.checked = checked);
+        updateSelectedCount();
+    }
+
+    function updateSelectedCount() {
+        const checked = document.querySelectorAll('.agent-checkbox:checked');
+        const count = checked.length;
+        const bar = document.getElementById('bulk-action-bar');
+        const countText = document.getElementById('selected-count');
+        
+        if (count > 0) {
+            bar.style.display = 'flex';
+            countText.innerText = `${count} serveur(s) sélectionné(s)`;
+        } else {
+            bar.style.display = 'none';
+        }
+    }
+
+    async function bulkMaintenance(action) {
+        const checked = document.querySelectorAll('.agent-checkbox:checked');
+        const targets = Array.from(checked).map(cb => cb.value);
+        
+        if (targets.length === 0) return;
+        if (!confirm(`Confirmer l'action "${action}" sur ${targets.length} serveurs ?`)) return;
+        
+        showToast(`Lancement de l'action de masse: ${action}`, 'info');
+        
+        // Exécuter l'action sur chaque cible (en série pour éviter de surcharger le broker)
+        for (const target of targets) {
+            await runAction(action, target);
+        }
+        
+        showToast(`Action de masse terminée.`, 'success');
+    }
+
+    function updateChartsData() {
+        if (!cpuChart || !ramChart) return;
+        const hosts = Object.keys(agentsHistory);
+        // Axe X aligné sur la plus longue série réellement disponible : le graphe
+        // ne s'étend qu'à mesure qu'il a de la donnée, il n'en invente pas.
+        const len = Math.max(0, ...hosts.map(h => agentsHistory[h].cpu.length));
+        cpuChart.data.labels = Array(len).fill('');
+        ramChart.data.labels = Array(len).fill('');
+        cpuChart.data.datasets = hosts.map(h => ({
+            label: h, data: agentsHistory[h].cpu, borderColor: agentsHistory[h].color, tension: 0.4, pointRadius: 0, borderWidth: 2, fill: false
+        }));
+        ramChart.data.datasets = hosts.map(h => ({
+            label: h, data: agentsHistory[h].ram, borderColor: agentsHistory[h].color, tension: 0.4, pointRadius: 0, borderWidth: 2, fill: false
+        }));
+        cpuChart.update('none');
+        ramChart.update('none');
+    }
+
+    async function runAction(action, target, type = 'standard') {
+        if (!confirm(`Confirmer l'action "${action}" sur ${target} ?`)) return;
+        
+        // Verrouiller l'interface pendant l'action
+        const buttons = document.querySelectorAll('button');
+        buttons.forEach(b => b.disabled = true);
+        
+        // Ouvrir la console de logs système automatique (intégration)
+        if (window.toggleConsole) {
+            const consoleEl = document.getElementById('rollup-console');
+            if (consoleEl && !consoleEl.classList.contains('expanded')) {
+                window.toggleConsole();
+            }
+        }
+
+        const container = document.getElementById('maintenance-console-container');
+        if (container) {
+            container.style.display = 'block';
+            logConsole(`[*] Initialisation de la maintenance : ${action} sur ${target}...`, 'var(--accent-primary)');
+        }
+        
+        try {
+            const res = await fetch('/api/admin/agent-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, target, type })
+            });
+            
+            if (res.status === 429) {
+                const errorData = await res.json();
+                logConsole(`[BLOQUÉ] ${errorData.error}`, 'var(--warning)');
+                showToast(errorData.error, 'error');
+                return;
+            }
+
+            const data = await res.json();
+            
+            if (data.success) {
+                logConsole(`[OK] Action terminée sur ${target}.`, 'var(--success)');
+                if (data.output) logConsole(data.output);
+                showToast(`Succès : ${action} sur ${target}`, 'success');
+                // Validation immédiate
+                setTimeout(updateAgents, 1500);
+            } else {
+                logConsole(`[FAIL] Échec de l'action sur ${target}.`, 'var(--error)');
+                if (data.error) logConsole(`Raison : ${data.error}`, 'var(--error)');
+                if (data.output) logConsole(data.output, 'var(--console-fg-err)');
+                showToast(`Erreur : ${data.error || 'Détails dans la console'}`, 'error');
+            }
+        } catch (e) {
+            logConsole(`[CRITICAL] Erreur réseau ou serveur : ${e.message}`, 'var(--error)');
+        } finally {
+            buttons.forEach(b => b.disabled = false);
+        }
+    }
+
+    async function bulkAction(type) {
+        // "Mettre à jour toute la flotte" utilise la queue de commandes (modèle pull HTTP)
+        // car l'AgentMaster tourne sous Linux (WinRM indisponible).
+        if (type === 'install-all') {
+            if (!confirm('Mettre à jour tous les agents en ligne via la queue de commandes ?\n\nLes agents v2.8.0+ vont télécharger la nouvelle version depuis AgentMaster.\nLes agents v2.7.6 nécessitent Bootstrap-Agent-FromMaster.ps1.')) return;
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(b => b.disabled = true);
+            const container = document.getElementById('maintenance-console-container');
+            if (container) container.style.display = 'block';
+            logConsole('[*] MISE À JOUR FLOTTE — via queue de commandes (modèle pull)...', 'var(--accent-primary)');
+            try {
+                const res = await fetch('/api/admin/fleet-update', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await res.json();
+                if (data.output) data.output.split('\n').forEach(l => {
+                    const color = l.startsWith('[*]') ? 'var(--success)' : l.startsWith('[!]') ? 'var(--warning)' : 'var(--console-fg)';
+                    logConsole(l, color);
+                });
+                if (data.queued && data.queued.length) {
+                    logConsole(`[*] update_agent envoyé à ${data.queued.length} agent(s). Rafraîchissement dans 15s...`, 'var(--success)');
+                    setTimeout(updateAgents, 15000);
+                }
+                showToast(data.success ? `Mise à jour lancée (${data.queued.length} agents)` : 'Mise à jour partielle — voir console', data.success ? 'success' : 'warning');
+            } catch(e) {
+                logConsole(`[CRITICAL] ${e.message}`, 'var(--error)');
+            } finally {
+                buttons.forEach(b => b.disabled = false);
+            }
+            return;
+        }
+
+        let action = '';
+        if (type === 'diagnose-all') action = 'diagnose';
+        else if (type === 'restart-all') action = 'restart';
+
+        if (!confirm(`Voulez-vous lancer l'action "${action}" sur TOUTE la flotte configurée ?`)) return;
+
+        const buttons = document.querySelectorAll('button');
+        buttons.forEach(b => b.disabled = true);
+
+        if (window.toggleConsole) {
+            const consoleEl = document.getElementById('rollup-console');
+            if (consoleEl && !consoleEl.classList.contains('expanded')) {
+                window.toggleConsole();
+            }
+        }
+
+        const container = document.getElementById('maintenance-console-container');
+        if (container) container.style.display = 'block';
+
+        logConsole(`[*] ORCHESTRATION FLOTTE : Lancement de "${action}" sur tous les serveurs...`, 'var(--accent-primary)');
+        logConsole(`[*] Cette opération peut prendre plusieurs minutes. Ne fermez pas cette page.`, 'var(--warning)');
+
+        try {
+            const res = await fetch('/api/admin/agent-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: action, target: 'all', type: 'standard' })
+            });
+
+            if (res.status === 429) {
+                const errorData = await res.json();
+                logConsole(`[BLOQUÉ] ${errorData.error}`, 'var(--warning)');
+                showToast(errorData.error, 'error');
+                return;
+            }
+
+            const data = await res.json();
+
+            if (data.success) {
+                logConsole(`[OK] Opération globale terminée avec succès.`, 'var(--success)');
+                if (data.output) logConsole(data.output);
+                showToast(`Succès global : ${action}`, 'success');
+                setTimeout(updateAgents, 2000);
+            } else {
+                logConsole(`[FAIL] L'opération globale a rencontré des erreurs.`, 'var(--error)');
+                if (data.error) logConsole(`Erreur: ${data.error}`, 'var(--error)');
+                if (data.output) logConsole(data.output, 'var(--console-fg-err)');
+                showToast(`Erreur : ${data.error || 'Certains serveurs ont échoué'}`, 'error');
+            }
+        } catch (e) {
+            logConsole(`[CRITICAL] Erreur fatale : ${e.message}`, 'var(--error)');
+        } finally {
+            buttons.forEach(b => b.disabled = false);
+        }
+    }
+
+    async function bulkMaintenance(action) {
+        const selected = Array.from(document.querySelectorAll('.agent-checkbox:checked')).map(cb => cb.value);
+        if (selected.length === 0) return;
+        
+        if (!confirm(`Confirmer "${action}" sur ${selected.length} serveurs ?`)) return;
+        
+        // Pour les sélections multiples, on traite un par un ou groupé ? 
+        // Le backend gère target: 'all' ou une string. On va boucler ou adapter le backend.
+        // Pour l'instant, traitons la sélection comme une série d'appels ou une liste.
+        // On va boucler ici pour garder le feedback par serveur.
+        
+        const container = document.getElementById('maintenance-console-container');
+        if (container) container.style.display = 'block';
+        
+        logConsole(`[*] Traitement par lots : ${selected.length} serveurs ciblés...`, 'var(--accent-primary)');
+        
+        for (const target of selected) {
+            logConsole(`[>] Exécution sur ${target}...`);
+            await runAction(action, target);
+        }
+        
+        logConsole(`[*] Traitement par lots terminé.`, 'var(--success)');
+        updateAgents();
+    }
+
+    function logConsole(msg, color = null) {
+        const consoleEl = document.getElementById('maintenance-console');
+        if (!msg || !consoleEl) return;
+        
+        // Séparation par lignes pour un effet console propre
+        const lines = msg.split('\n');
+        lines.forEach(line => {
+            if (line.trim() === "") return;
+            const div = document.createElement('div');
+            div.style.marginBottom = '2px';
+            if (color) div.style.color = color;
+            
+            // Auto-coloration basique
+            if (line.includes('[OK]') || line.includes('succes') || line.includes('installe')) div.style.color = 'var(--success)';
+            if (line.includes('[ERREUR]') || line.includes('FAIL') || line.includes('error')) div.style.color = 'var(--error)';
+            if (line.includes('[*]')) div.style.color = 'var(--accent-primary)';
+            
+            div.innerText = line.startsWith('>') ? line : '> ' + line;
+            consoleEl.appendChild(div);
+        });
+        
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    // showToast() est définie globalement dans base.html — pas de redéfinition locale ici.
+</script>
+{% endblock %}
+

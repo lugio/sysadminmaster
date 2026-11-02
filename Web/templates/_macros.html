@@ -1,0 +1,48 @@
+{#
+  _macros.html — composants partagés du Design System SysAdminMaster.
+  Un pattern répété ≥3 fois dans les templates doit passer par une macro d'ici,
+  pas être recopié. Démonstration d'usage réel : voir /styleguide.
+#}
+
+{# En-tête de carte : <h3><icon> Titre</h3> — répété dans quasi toutes les pages.
+   icon_class optionnel : ex. 'text-accent'/'text-warning'/'text-error' pour teinter l'icône. #}
+{% macro card_header(icon, title, icon_class='') %}
+<h3><span class="material-symbols-rounded {{ icon_class }}">{{ icon }}</span> {{ title }}</h3>
+{% endmacro %}
+
+{# Carte outil cliquable : icône + titre + description + bouton d'action.
+   `color` ∈ blue|amber|red (cf. .tool-card-icon.{color} dans style.css). #}
+{% macro tool_card(icon, color, title, desc, action, label='Exécuter') %}
+<div class="tool-card" onclick="runTool('{{ action }}')">
+    <div class="row gap-3" style="align-items:flex-start;">
+        <div class="tool-card-icon {{ color }}">
+            <span class="material-symbols-rounded">{{ icon }}</span>
+        </div>
+        <div class="tool-card-body">
+            <div class="tool-card-title">{{ title }}</div>
+            <div class="tool-card-desc">{{ desc }}</div>
+        </div>
+    </div>
+    <div class="tool-card-footer">
+        <button class="btn-action btn-sm" onclick="event.stopPropagation(); runTool('{{ action }}')">
+            <span class="material-symbols-rounded" style="font-size:15px;">play_arrow</span> {{ label }}
+        </button>
+    </div>
+</div>
+{% endmacro %}
+
+{# Bloc de sortie console/terminal — remplace les <pre>/<div> dark inline #}
+{% macro console_box(id, height='220px') %}
+<div id="{{ id }}" class="console-box" style="height:{{ height }};"></div>
+{% endmacro %}
+
+{# Stat card : icône + label + valeur — KPI de synthèse #}
+{% macro stat_card(icon, label, value, soft='bg-primary-soft', value_id=none) %}
+<div class="card stat-card">
+    <div class="stat-card-icon {{ soft }}"><span class="material-symbols-rounded">{{ icon }}</span></div>
+    <div class="stack gap-1">
+        <div class="stat-card-label">{{ label }}</div>
+        <div class="stat-card-value"{% if value_id %} id="{{ value_id }}"{% endif %}>{{ value }}</div>
+    </div>
+</div>
+{% endmacro %}

@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card_header %}
+
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard Opérationnel{% endblock %}
+
+{% block content %}
+<div id="section-dashboard" class="content-section fade-in">
+    <!-- Top Strip: Nodes Availability -->
+    <div style="margin-bottom: 32px;">
+        <div class="row justify-between" style="margin-bottom: 16px; padding: 0 4px;">
+            <h3 class="text-muted uppercase font-black row gap-2" style="margin: 0; font-size: 0.75rem; letter-spacing: 0.12em;">
+                <span class="material-symbols-rounded text-accent" style="font-size: 18px;">hub</span>
+                Disponibilité des Nœuds RDS
+            </h3>
+            <div class="row gap-2">
+                <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--success);"></div>
+                <span class="text-muted uppercase font-bold" style="font-size: 0.65rem;">Tous les systèmes opérationnels</span>
+            </div>
+        </div>
+        <div class="servers-slider-wrapper">
+            <button class="slider-arrow left" onclick="scrollSlider(-1)" aria-label="Précédent">
+                <span class="material-symbols-rounded">chevron_left</span>
+            </button>
+            <div id="servers-overview" class="servers-overview-container">
+                <!-- Skeletons -->
+                <div class="skeleton" style="height: 100px; min-width: 200px; border-radius: 20px;"></div>
+                <div class="skeleton" style="height: 100px; min-width: 200px; border-radius: 20px;"></div>
+                <div class="skeleton" style="height: 100px; min-width: 200px; border-radius: 20px;"></div>
+                <div class="skeleton" style="height: 100px; min-width: 200px; border-radius: 20px;"></div>
+            </div>
+            <button class="slider-arrow right" onclick="scrollSlider(1)" aria-label="Suivant">
+                <span class="material-symbols-rounded">chevron_right</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Grid Dashboard -->
+    <div class="dashboard-grid">
+        <!-- Left Column: Primary Metrics -->
+        <div class="stack gap-6">
+            <div class="card">
+                {{ card_header('monitoring', 'Performance Globale de la Ferme', 'text-accent') }}
+                <canvas id="perf-chart" style="max-height: 280px; width: 100%;"></canvas>
+            </div>
+
+            <div class="card">
+                {{ card_header('list_alt', 'Processus à Haut Impact (CPU)', 'text-accent') }}
+                <div class="table-scroll" style="margin-top:20px;">
+                    <table style="width: 100%; border-collapse: separate; border-spacing: 0 8px;">
+                        <thead>
+                            <tr class="text-left">
+                                <th class="text-muted uppercase" style="padding: 10px; font-size: 0.7rem;">Nom / Image</th>
+                                <th class="text-muted uppercase text-center" style="padding: 10px; font-size: 0.7rem;">Charge CPU</th>
+                                <th class="text-muted uppercase text-center" style="padding: 10px; font-size: 0.7rem;">RAM</th>
+                            </tr>
+                        </thead>
+                        <tbody id="proc-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Secondary Stats & Health -->
+        <div class="stack gap-6">
+            <div class="card">
+                {{ card_header('analytics', 'Indicateurs Temps Réel', 'text-accent') }}
+                <div style="display: grid; gap: 20px;">
+                    <div class="metric-box-premium" title="Utilisation CPU totale de l'hôte distant">
+                        <span class="material-symbols-rounded metric-icon-overlay">developer_board</span>
+                        <div class="metric-header">
+                            <div class="row gap-2">
+                                <span class="material-symbols-rounded text-accent" style="font-size:18px;">memory</span>
+                                <span class="metric-label">Charge CPU</span>
+                            </div>
+                            <span id="cpu-value" class="metric-value text-accent">--%</span>
+                        </div>
+                        <div class="progress-container progress-container-sm" style="margin-top:12px;">
+                            <div id="cpu-bar" class="progress-bar progress-bar-rounded" style="width:0%;"></div>
+                        </div>
+                    </div>
+                    <div class="metric-box-premium" title="Utilisation de la mémoire physique (RAM)">
+                        <span class="material-symbols-rounded metric-icon-overlay">clarify</span>
+                        <div class="metric-header">
+                            <div class="row gap-2">
+                                <span class="material-symbols-rounded text-success" style="font-size:18px;">database</span>
+                                <span class="metric-label">Mémoire Vive</span>
+                            </div>
+                            <span id="mem-value" class="metric-value text-success">--%</span>
+                        </div>
+                        <div class="progress-container progress-container-sm" style="margin-top:12px;">
+                            <div id="mem-bar" class="progress-bar progress-bar-rounded" style="width:0%; background: var(--success);"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="uptime-badge row justify-between" style="margin-top: 24px;">
+                    <div class="row gap-2">
+                        <span class="material-symbols-rounded" style="color:var(--accent-tertiary); font-size:20px;">timer</span>
+                        <span class="text-muted font-bold" style="font-size: 0.75rem;">Uptime Système</span>
+                    </div>
+                    <span id="uptime-value" class="mono font-bold" style="color: var(--accent-tertiary); font-size:0.9rem;">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                {{ card_header('storage', 'Stockage Critique', 'text-accent') }}
+                <div id="disk-list" class="stack gap-4" style="margin-top:20px;">
+                    <!-- Filled by JS -->
+                </div>
+            </div>
+
+            <div class="card">
+                {{ card_header('event_note', "Journal d'Alertes", 'text-accent') }}
+                <div id="broker-alerts" class="stack gap-3" style="margin-top:20px;">
+                    <div class="row gap-3" style="padding:12px; border-radius:12px; background: var(--success-light); border: 1px solid rgba(16, 185, 129, 0.1);">
+                        <span class="material-symbols-rounded text-success" style="font-size:20px;">verified</span>
+                        <span class="font-bold" style="font-size:0.8rem; color: var(--slate-700);">Aucune anomalie détectée</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let perfChart;
+    function initChart() {
+        const ctx = document.getElementById('perf-chart').getContext('2d');
+        perfChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'CPU %',
+                    borderColor: getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim(),
+                    data: [],
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 0
+                }, {
+                    label: 'RAM %',
+                    borderColor: getComputedStyle(document.documentElement).getPropertyValue('--success').trim(),
+                    data: [],
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { 
+                    y: { min: 0, max: 100, ticks: { font: { size: 10 } } },
+                    x: { ticks: { display: false } }
+                },
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+                animation: false
+            }
+        });
+    }
+
+    async function updateData() {
+        try {
+            const selectedServer = document.getElementById('global-server-filter').value;
+            const metricsRes = await fetch(`/api/metrics?server=${selectedServer}`);
+            const metrics = await metricsRes.json();
+            
+            if (metrics) {
+                const cpu = metrics.CPU || 0;
+                document.getElementById('cpu-value').innerText = cpu.toFixed(1) + '%';
+                document.getElementById('cpu-bar').style.width = cpu + '%';
+                
+                const mem = (metrics.Memory && metrics.Memory.UsedPercent) ? metrics.Memory.UsedPercent : 0;
+                document.getElementById('mem-value').innerText = mem.toFixed(1) + '%';
+                document.getElementById('mem-bar').style.width = mem + '%';
+                
+                document.getElementById('uptime-value').innerText = metrics.Uptime || 'N/A';
+
+                const now = new Date().toLocaleTimeString();
+                if (perfChart) {
+                    perfChart.data.labels.push(now);
+                    perfChart.data.datasets[0].data.push(cpu);
+                    perfChart.data.datasets[1].data.push(mem);
+                    if (perfChart.data.labels.length > 20) {
+                        perfChart.data.labels.shift();
+                        perfChart.data.datasets[0].data.shift();
+                        perfChart.data.datasets[1].data.shift();
+                    }
+                    perfChart.update();
+                }
+
+                const diskList = document.getElementById('disk-list');
+                if (diskList && metrics.Disks) {
+                    diskList.innerHTML = '';
+                    const disks = Array.isArray(metrics.Disks) ? metrics.Disks : [metrics.Disks];
+                    disks.forEach(d => {
+                        diskList.innerHTML += `
+                            <div class="storage-item">
+                                <div class="row justify-between" style="margin-bottom:8px;">
+                                    <div class="row gap-2">
+                                        <span class="material-symbols-rounded text-accent" style="font-size:18px;">hard_drive</span>
+                                        <span class="font-black text-strong" style="font-size: 0.85rem;">Volume ${d.Drive}</span>
+                                    </div>
+                                    <span class="text-subtle font-black" style="font-size: 0.75rem;">${d.UsedPercent}%</span>
+                                </div>
+                                <div class="progress-container progress-container-sm" style="height: 6px;">
+                                    <div class="progress-bar" style="width:${d.UsedPercent}%; background: ${d.UsedPercent > 90 ? 'var(--error)' : (d.UsedPercent > 75 ? 'var(--warning)' : 'var(--accent-primary)')}"></div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+            }
+
+            updateServersOverview();
+            updateProcesses();
+            
+            // Appel à l'update global du header s'il existe
+            if (window.updateGlobalStats) window.updateGlobalStats();
+            
+        } catch (e) {
+            if (window.SAM_Log) SAM_Log.error("Erreur lors de la mise a jour des metriques", e);
+            else console.error("Update error", e);
+        }
+    }
+
+    async function updateServersOverview() {
+        try {
+            const res = await fetch('/api/servers');
+            const servers = await res.json();
+            const sessionRes = await fetch('/api/sessions');
+            const allSessions = await sessionRes.json();
+            
+            const selectedServer = document.getElementById('global-server-filter').value;
+            const container = document.getElementById('servers-overview');
+            container.innerHTML = '';
+            
+            if (Array.isArray(servers)) {
+                servers.forEach(srv => {
+                    const srvName = typeof srv === 'string' ? srv : srv.name;
+                    const srvShort = typeof srv === 'string' ? srv.split('.')[0].toUpperCase() : srv.shortName;
+                    const status = typeof srv === 'string' ? 'online' : srv.status;
+                    const cpu = typeof srv === 'string' ? 0 : srv.cpu;
+                    const ram = typeof srv === 'string' ? 0 : srv.ram;
+
+                    const srvSessions = (Array.isArray(allSessions) ? allSessions : []).filter(s => {
+                        const sHost = (s.HostServer || "").toUpperCase().split('.')[0];
+                        const tHost = srvShort.toUpperCase().split('.')[0];
+                        return sHost === tHost;
+                    });
+                
+                const active = srvSessions.filter(s => s.SessionState && s.SessionState.includes('Active')).length;
+                const total = srvSessions.length;
+                const isSelected = selectedServer === 'All' || selectedServer === srvName;
+                
+                // Status color mapper
+                const statusColor = status === 'online' ? 'var(--success)' : (status === 'stale' ? 'var(--warning)' : 'var(--error)');
+                const isOffline = status === 'offline';
+
+                const nodeCard = document.createElement('div');
+                nodeCard.className = `server-node-card ${isSelected ? 'active' : ''} ${isOffline ? 'offline' : ''}`;
+                
+                nodeCard.onclick = () => {
+                    const select = document.getElementById('global-server-filter');
+                    if (select) {
+                        select.value = srvName;
+                        onGlobalServerChange();
+                    }
+                };
+
+                nodeCard.innerHTML = `
+                    <div class="node-header">
+                        <span class="node-name">${srvShort}</span>
+                        <div class="node-status-group">
+                            <span class="status-dot" style="width: 8px; height: 8px; border-radius: 50%; background: ${statusColor}; display:block;"></span>
+                            ${status === 'online' ? `<span class="status-dot pulse" style="position:absolute; top:0; left:0; width: 8px; height: 8px; border-radius: 50%; background: var(--success); opacity:0.4; animation: pulse-ring 2s infinite;"></span>` : ''}
+                        </div>
+                    </div>
+
+                    <div class="node-stats">
+                        <div class="node-session-info">
+                            <div class="row" style="gap:6px;">
+                                <span class="material-symbols-rounded text-muted" style="font-size: 14px;">groups</span>
+                                <span class="node-session-count">${total}</span>
+                            </div>
+                            <span class="node-session-label">${active} Actives</span>
+                        </div>
+                        <div class="node-perf-mini">
+                            <div class="mini-metric">
+                                <span class="label">CPU</span>
+                                <span class="val">${cpu.toFixed(0)}%</span>
+                            </div>
+                            <div class="mini-metric">
+                                <span class="label">RAM</span>
+                                <span class="val">${ram.toFixed(0)}%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="node-progress-track">
+                        <div class="node-progress-bar" style="width: ${cpu}%; background: ${cpu > 80 ? 'var(--error)' : (cpu > 50 ? 'var(--warning)' : 'var(--accent-primary)')};"></div>
+                    </div>
+                `;
+                container.appendChild(nodeCard);
+            });
+            }
+            
+            // Scroll automatique vers le serveur sélectionné
+            if (selectedServer !== 'All') {
+                setTimeout(scrollToActiveServer, 100);
+            }
+        } catch (e) {}
+    }
+
+    function scrollSlider(direction) {
+        const container = document.getElementById('servers-overview');
+        const scrollAmount = 300;
+        container.scrollBy({ left: direction * scrollAmount, behavior: 'smooth' });
+    }
+
+    function scrollToActiveServer() {
+        const activeCard = document.querySelector('.server-node-card.active');
+        if (activeCard) {
+            activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+    }
+
+    async function updateProcesses() {
+        try {
+            const selectedServer = document.getElementById('global-server-filter').value;
+            const res = await fetch(`/api/processes?server=${selectedServer}`);
+            const procs = await res.json();
+            const body = document.getElementById('proc-body');
+            body.innerHTML = '';
+            
+            const list = Array.isArray(procs) ? procs : (procs ? [procs] : []);
+            list.forEach(p => {
+                const cpuVal = parseFloat(p.CPU);
+                let heatClass = 'cpu-heat-low';
+                if (cpuVal > 20) heatClass = 'cpu-heat-med';
+                if (cpuVal > 50) heatClass = 'cpu-heat-high';
+
+                // Alignement Audit: Extraction de l'étiquette serveur [SRVNAME]
+                let procName = p.Name;
+                if (procName.startsWith('[')) {
+                    const match = procName.match(/^\[(.*?)\]\s*(.*)$/);
+                    if (match) {
+                        procName = `<span class="node-label-highlighter">${match[1]}</span> ${match[2]}`;
+                    }
+                }
+
+                body.innerHTML += `
+                    <tr class="proc-row">
+                        <td style="padding: 14px 10px; border-bottom: 1px solid var(--slate-50);">
+                            <div class="row gap-3">
+                                <div class="row justify-center" style="width:36px; height:36px; border-radius:10px; background:var(--bg-primary); border: 1px solid var(--slate-100);">
+                                    <span class="material-symbols-rounded text-muted" style="font-size:20px;">settings_suggest</span>
+                                </div>
+                                <span class="font-bold text-subtle" style="font-size:0.85rem;">${procName}</span>
+                            </div>
+                        </td>
+                        <td class="text-center" style="padding: 10px;">
+                            <span class="${heatClass} mono" style="font-size: 0.85rem;">${p.CPU.toFixed(1)}%</span>
+                        </td>
+                        <td class="text-center text-subtle font-bold" style="padding: 10px; font-size: 0.8rem;">
+                            ${p.MemMB} <small class="text-muted" style="font-weight:400;">MB</small>
+                        </td>
+                    </tr>`;
+            });
+        } catch (e) {}
+    }
+
+    function onServerChange() {
+        if (perfChart) {
+            perfChart.data.labels = [];
+            perfChart.data.datasets[0].data = [];
+            perfChart.data.datasets[1].data = [];
+            perfChart.update('none');
+        }
+        updateData();
+    }
+
+    window.onServerChange = onServerChange;
+    initChart();
+    updateData();
+    setInterval(updateData, 10000);
+</script>
+{% endblock %}

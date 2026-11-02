@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python — syntax and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Parse every .py file
+        run: |
+          find . -name '*.py' -not -path './.git/*' -not -path '*/__pycache__/*' -print0 \
+          | xargs -0 -I{} python3 -c "import ast; ast.parse(open('{}', encoding='utf-8').read())"
+      - name: Read-only token contract
+        run: python3 tests/test_read_token.py
+
+  repository-checks:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Every place that declares a version must equal the VERSION file.
+      - name: Version declarations
+        run: python3 tools/check-version.py
+      # No OpenAPI description exists: this catches UI calls to missing or unmounted routes.
+      - name: UI calls target live routes
+        run: python3 tools/check-endpoints.py
+      # Inline <script> blocks are compiled by nothing before the browser; one stray quote
+      # kills the whole block while the page is still served with 200.
+      - name: Inline JavaScript compiles
+        run: python3 tools/check-template-js.py
+      # Session hosts run Windows PowerShell 5.1, which reads scripts as CP1252: an en dash
+      # inside a string becomes a closing quote and the script no longer parses.
+      - name: No typographic characters in PowerShell code
+        run: python3 tools/check-ps-encoding.py
+      - name: No runtime secret file tracked
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$|(^|/)Config/config\.json$'; then
+            echo "::error::A runtime secret file (.env or Config/config.json) is tracked."
+            exit 1
+          fi
+
+  powershell:
+    name: PowerShell — parse check (no execution)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every .ps1 / .psm1 / .psd1
+        shell: pwsh
+        run: |
+          $fail = 0
+          Get-ChildItem -Recurse -Include *.ps1,*.psm1,*.psd1 |
+            Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' } |
+            ForEach-Object {
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors)
+              if ($errors -and $errors.Count -gt 0) {
+                Write-Host "::error file=$($_.FullName)::$($errors.Count) parse error(s)"
+                $errors | ForEach-Object { Write-Host "   $($_.Message)" }
+                $fail = 1
+              } else { Write-Host "ok  $($_.Name)" }
+            }
+          exit $fail

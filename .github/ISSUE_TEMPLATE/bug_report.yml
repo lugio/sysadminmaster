@@ -1,0 +1,53 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Remove tokens, passwords, host names, user names and IP addresses**
+        from everything you paste. Security issues go through SECURITY.md, not here.
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: Dashboard version (footer or VERSION file) and agent version (Agents page).
+      placeholder: "dashboard 2.32.0, agent 2.31.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Dashboard (Web/)
+        - AgentMaster (ingestion, port 5000)
+        - Agent (PowerShell)
+        - Installer / deployment scripts
+        - Licence alerts (e-mail)
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open /licenses
+        2. Click ...
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Server OS and Python version; Windows Server version of the session hosts; reverse proxy if any.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines (redacted)
+      render: text

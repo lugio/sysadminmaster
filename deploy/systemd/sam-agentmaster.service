@@ -1,0 +1,29 @@
+# SysAdminMaster — AgentMaster (agent ingestion and command queue, TCP 5000)
+# Install: see docs/installation.md
+[Unit]
+Description=SysAdminMaster AgentMaster
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sam
+Group=sam
+WorkingDirectory=/opt/sysadminmaster
+EnvironmentFile=/opt/sysadminmaster/.env
+ExecStart=/opt/sysadminmaster/.venv-linux/bin/python AgentMaster/master.py
+Restart=always
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sysadminmaster
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

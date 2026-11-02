@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# pre-push hook — runs the cheap repository checks before anything leaves your machine.
+#
+# It mirrors the CI jobs that do not need PowerShell, so a push that would turn the CI red
+# is stopped locally. It is a convenience, not a protection: it can be bypassed with
+# `git push --no-verify` and only guards this clone. Branch protection on the server side
+# is what actually enforces "green CI, no force-push".
+#
+# Checks, cheapest first:
+#   1. no force-push or deletion of main
+#   2. no runtime secret file tracked (.env, Config/config.json)
+#   3. every version declaration == VERSION
+#   4. every UI call targets a live route
+#   5. no typographic characters in PowerShell code
+#   6. inline JavaScript in templates compiles
+#   7. every .py file parses
+#
+# The end-to-end suite (`./e2e/run-tests.sh --gate`) is deliberately NOT run here: it
+# takes minutes and drives a browser against a real dashboard.
+#
+# Install:  ln -sf ../../tools/hooks/pre-push .git/hooks/pre-push
+# Bypass:   git push --no-verify   (only when you know why)
+
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+RED='\033[0;31m'; GRN='\033[0;32m'; YEL='\033[0;33m'; NC='\033[0m'
+fail() { printf "${RED}  ✗ %s${NC}\n" "$1"; FAILED=1; }
+ok()   { printf "${GRN}  ✓ %s${NC}\n" "$1"; }
+
+FAILED=0
+printf "\n${YEL}pre-push — contrôles locaux (substitut à la protection de branche)${NC}\n"
+
+# ── 1. Force-push sur main ───────────────────────────────────────────────────
+# stdin : <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref local_sha remote_ref remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+
+  # Suppression de branche
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    fail "suppression de refs/heads/main refusée"
+    continue
+  fi
+  # Le remote existe déjà et n'est pas un ancêtre du local => réécriture
+  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+      fail "force-push sur main refusé — ${remote_sha:0:7} n'est pas un ancêtre de ${local_sha:0:7}"
+      fail "  (l'historique distant serait réécrit ; aucun autre garde-fou ne le rattrapera)"
+      continue
+    fi
+  fi
+  ok "push sur main en avance rapide"
+done
+
+# ── 2. Secrets runtime ───────────────────────────────────────────────────────
+if git ls-files | grep -Eq '(^|/)\.env$|(^|/)Config/config\.json$'; then
+  fail "un fichier de secrets runtime (.env / Config/config.json) est suivi par git"
+else
+  ok "aucun fichier de secrets runtime suivi"
+fi
+
+# ── 3. Cohérence des versions ────────────────────────────────────────────────
+if python3 tools/check-version.py >/tmp/sam-precheck-version.log 2>&1; then
+  ok "toutes les déclarations de version sont alignées"
+else
+  fail "versions désynchronisées — python3 tools/check-version.py --fix"
+  grep -E 'DÉRIVE|error' /tmp/sam-precheck-version.log | sed 's/^/      /'
+fi
+
+# ── 3bis. Alignement endpoints ↔ appels UI ───────────────────────────────────
+# Sans description OpenAPI, rien ne décrit le contrat des routes : ce contrôle attrape le
+# désalignement qui produit des 404 silencieux (appel vers une route inexistante
+# ou vers un blueprint non monté).
+if python3 tools/check-endpoints.py >/tmp/sam-precheck-endpoints.log 2>&1; then
+  ok "tout appel de l'UI vise une route déclarée et vivante"
+else
+  fail "désalignement endpoints ↔ UI — python3 tools/check-endpoints.py"
+  grep -E '^     ' /tmp/sam-precheck-endpoints.log | head -10 | sed 's/^/   /'
+fi
+
+# ── 3ter. Typographie Unicode dans le code PowerShell ────────────────────────
+# Les RDS lisent les scripts en CP1252 : un tiret cadratin dans une CHAÎNE y
+# devient un guillemet fermant et casse le parsing. Trois incidents sur ce seul
+# mécanisme. La CI PowerShell tourne en PS 7 et ne le voit pas.
+if python3 tools/check-ps-encoding.py >/tmp/sam-precheck-psenc.log 2>&1; then
+  ok "aucun caractère typographique dans le code PowerShell"
+else
+  fail "typographie Unicode dans du code PS — python3 tools/check-ps-encoding.py"
+  grep -E '^   ' /tmp/sam-precheck-psenc.log | head -10 | sed 's/^/   /'
+fi
+
+# ── 3quater. JavaScript inline des templates ────────────────────────
+# Le JS des templates n'est compilé par RIEN avant d'atteindre le navigateur :
+# une apostrophe non échappée tue tout le bloc <script>, la page reste servie en
+# 200, et le défaut ne se voit qu'à l'écran. Payé le 23/09/2026 (licenses.html,
+# deux specs e2e rouges sur un symptôme qui ne désignait pas la cause).
+if python3 tools/check-template-js.py >/tmp/sam-precheck-tpljs.log 2>&1; then
+  ok "le JavaScript inline des templates compile"
+else
+  fail "JavaScript inline invalide — python3 tools/check-template-js.py"
+  grep -E '^  ' /tmp/sam-precheck-tpljs.log | head -10 | sed 's/^/   /'
+fi
+
+# ── 4. AST Python ────────────────────────────────────────────────────────────
+PY=./.venv-linux/bin/python
+[ -x "$PY" ] || PY=python3
+if find . -name '*.py' \
+     -not -path './.venv-linux/*' -not -path './.git/*' \
+     -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -print0 \
+   | xargs -0 -I{} "$PY" -c "import ast; ast.parse(open('{}',encoding='utf-8').read())" 2>/tmp/sam-precheck-ast.log
+then
+  ok "tous les .py parsent"
+else
+  fail "erreur de syntaxe Python"
+  sed 's/^/      /' /tmp/sam-precheck-ast.log | tail -5
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  printf "\n${RED}Push refusé.${NC} Corriger ci-dessus, ou forcer avec ${YEL}git push --no-verify${NC}\n"
+  printf "${YEL}Rappel : la CI GitHub rejouera ces contrôles + le parse PowerShell.${NC}\n\n"
+  exit 1
+fi
+
+printf "${GRN}Contrôles locaux OK.${NC} La CI rejouera le parse PowerShell (absent de cette machine).\n\n"
+exit 0
